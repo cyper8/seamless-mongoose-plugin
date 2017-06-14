@@ -1,0 +1,26 @@
+{
+  "name": "seamless-mongoose-plugin",
+  "version": "0.0.1",
+  "description": "Mongoose plugin for Seamless data-binding client-side framework",
+  "main": "seamless-mongoose-plugin.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyper8/seamless-mongoose-plugin.git"
+  },
+  "keywords": [
+    "seamless",
+    "data-binding",
+    "mongoose",
+    "plugin",
+    "nodejs"
+  ],
+  "author": "Anton Yashchuk <anton.yashchuk@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cyper8/seamless-mongoose-plugin/issues"
+  },
+  "homepage": "https://github.com/cyper8/seamless-mongoose-plugin#readme"
+}

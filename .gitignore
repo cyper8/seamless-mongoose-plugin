@@ -1,0 +1,11 @@
+#npm
+
+./node_modules
+
+#nvm
+
+./.nvmrc
+
+#c9
+
+./.c9
