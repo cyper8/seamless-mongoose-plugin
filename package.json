@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "Mongoose plugin for Seamless data-binding client-side framework",
   "main": "seamless-mongoose-plugin.js",
+  "module": "seamless-mongoose-plugin.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -17,6 +18,10 @@
     "plugin",
     "nodejs"
   ],
+  "peerDependencies": {
+    "mongoose": "^4.10.5",
+    "express": "^4.14.0"
+  },
   "author": "Anton Yashchuk <anton.yashchuk@gmail.com>",
   "license": "MIT",
   "bugs": {
