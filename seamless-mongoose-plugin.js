@@ -1,31 +1,70 @@
 module.exports = exports = function SeamlessMongoosePlugin(schema){
-  var databuf = {},
-    queries = {},
-    clients = {},
-    requests = {},
-    timestamp = {};
+  var buffer = Buffer();
   
-  var BUFFER_TTL = 21000;
-
-  // buffer maintenance 
-  SeamlessMongoosePlugin._garbageCollector = setInterval(function() {
-    console.log("GC: " + BUFFER_TTL);
-    var i, c = 0;
-    for (i in timestamp) {
-      if ((Date.now() - timestamp[i]) > BUFFER_TTL) {
-        console.log(">>> Clearing " + i);
-        delete databuf[i];
-        delete queries[i];
-        delete clients[i];
-        delete timestamp[i];
-        // TODO: need to clear requests
+  // data buffer abstraction - to move it under redis and make plugin stateless
+  // and work in multithreaded envs
+  function Buffer(){
+    var databuf = {}, // buffer with stringified responses - per reqid
+      queries = {}, // buffer with queries - per reqid
+      clients = {}, // buffer with clients subscribed for a changes - per reqid
+      requests = {}, // buffer with reqids - per document
+      timestamp = {}; // buffer with timestamps of requests - per reqid
+    
+    var BUFFER_TTL = 21000;
+  
+    // buffer maintenance 
+    var _garbageCollector = setInterval(function() {
+      console.log("GC: " + BUFFER_TTL);
+      var i, c = 0;
+      for (i in timestamp) {
+        if ((Date.now() - timestamp[i]) > BUFFER_TTL) {
+          console.log(">>> Clearing " + i);
+          delete databuf[i];
+          delete queries[i];
+          delete clients[i];
+          delete timestamp[i];
+          // TODO: need to clear requests
+        }
+        else c++;
       }
-      else c++;
+      console.log(">>> " + c + " buffer records inspected");
+      BUFFER_TTL = (-3 * c) + 21000;
+    }, BUFFER_TTL);
+    
+    return {
+      get(id,key){
+        switch (key){
+          case "data":
+            return id?databuf[id]:databuf;
+          case "query":
+            return id?queries[id]:queries;
+          case "clients":
+            return id?clients[id]:clients;
+          case "requests":
+            return id?requests[id]:requests;
+          case "timestamp":
+            return id?timestamp[id]:timestamp;
+          default:
+            return (BUFFER_TTL-21000)/(-3); // count of unique requests
+        }
+      },
+      set(id,key,v){
+        switch (key){
+          case "data":
+            return v?databuf[id]=v:delete databuf[id];
+          case "query":
+            return v?queries[id]=v:delete queries[id];
+          case "clients":
+            return v?clients[id]=v:delete clients[id];
+          case "requests":
+            return v?requests[id]=v:delete requests[id];
+          case "timestamp":
+            return v?timestamp[id]=v:delete timestamp[id];
+        }
+      }
     }
-    console.log(">>> " + c + " buffer records inspected");
-    BUFFER_TTL = (-3 * c) + 21000;
-  }, BUFFER_TTL);
-
+  }
+  
   function _resAdapter(data){
     data = data._doc || data;
     data = (data instanceof Array) ? data : [data];
@@ -53,7 +92,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
       else {
         docs = _resAdapter(docs);
-        data = databuf[reqid] = strfy(docs);
+        data = buffer.set(reqid,"data",strfy(docs));
       }
       responses.forEach(function(res){
         if (res.type) res.type('application/json');
@@ -63,7 +102,10 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       });
       if (docs instanceof Array) {
         docs.forEach(function(doc){
-          if (requests[doc._id].indexOf(reqid) == -1) requests[doc._id].push(reqid);
+          var r = buffer.get(doc._id,"requests");
+          if (r && r.indexOf && (r.indexOf(reqid) == -1)) {
+            buffer.set(doc._id,"requests",r.push(reqid));
+          }
         });
       }
     };
@@ -82,42 +124,50 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   }
   
   SeamlessMongoosePlugin.registerClient = function(id, peer) {
-    if (clients[id] instanceof Array) {
-      if (clients[id].indexOf(peer) == -1) {
-        clients[id] = clients[id].concat(peer);
+    var c = buffer.get(id,"clients");
+    if (c instanceof Array) {
+      if (c.indexOf(peer) == -1) {
+        c = c.concat(peer);
+        buffer.set(id,"clients",c);
         return true;
       }
       return false;
     }
     else {
-      clients[id] = [peer];
+      c = [peer];
+      buffer.set(id,"clients",c);
       return true;
     }
   };
   
   SeamlessMongoosePlugin.deregisterClient = function(id, peer) {
-    if (clients[id] && clients[id].length) {
-      var pos = clients[id].indexOf(peer);
+    var c = buffer.get(id,"clients");
+    if (c && c.length) {
+      var pos = c.indexOf(peer);
       if (pos >= 0) {
-        clients[id].splice(pos, 1);
-        if (!clients[id].length) {
-          delete clients[id];
+        c.splice(pos, 1);
+        if (!c.length) {
+          c=null;
         }
+        buffer.set(id,"clients",c);
       }
     }
   };
   
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var Model = this;
-    return mapall(changed_docs_ids,requests)
+    return mapall(changed_docs_ids,buffer.get(null,"requests"))
     .map(function(reqid){ // get requests objects
-      if (queries[reqid]) return Model.find(queries[reqid])
-        .then(RespondTo(clients[reqid],reqid));
+      var q;
+      if (q=buffer.get(reqid,"queries"))
+        return Model.find(q)
+          .then(RespondTo(buffer.get(reqid,"clients"),reqid));
     });
   }; // returns an array of promises
   
   schema.statics.getData = function(reqid,query){
-    if (databuf[reqid]) return new Promise.resolve(databuf[reqid]);
+    var b;
+    if (b=buffer.get(reqid,"data")) return new Promise.resolve(b);
     else {
       return this.find(query);
     }
@@ -155,8 +205,8 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   SeamlessMongoosePlugin.SeamlessHTTPEndpointFor = function (Model){
     return function(req,res,next){
       var reqid = req.path;
-      var query = queries[reqid] = req.params;
-      timestamp[reqid] = Date.now();
+      var query = buffer.set(reqid,"querie",req.params);
+      buffer.set(reqid,"timestamp",Date.now());
       switch (req.method){
         case "GET":
           return (
@@ -176,7 +226,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         case "POST":
           SeamlessMongoosePlugin.registerClient(reqid,res);
           return Model.postData(reqid,query,req.body)
-          .then(RespondTo(clients[reqid],reqid))
+          .then(RespondTo(buffer.get(reqid,"clients"),reqid))
           .catch(HandleErrTo(res,reqid));
         default:
           return next();
@@ -187,8 +237,8 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
     return function(ws,req){
       var reqid = req.path;
-      var query = queries[reqid] = req.params;
-      timestamp[reqid] = Date.now();
+      var query = buffer.set(reqid,"querie",req.params);
+      buffer.set(reqid,"timestamp",Date.now());
       SeamlessMongoosePlugin.registerClient(reqid,ws);
       ws.on('message',function(message,flags){
         if (!flags.binary){
@@ -210,5 +260,24 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     };
   };
   
-  // TODO: define middleware hooks
+  // document middleware
+  function _DM_(doc){
+    this.Model.notifyRegisteredClients(doc._id);
+  }
+  
+  // query middleware
+  function _QM_(result){
+    var docs = _resAdapter(result);
+    schema.statics.notifyRegisteredClients.bind(this)
+    .call(this,docs.map(function(d){return d._id}));
+  }
+  
+  ['save','update'].forEach(function(hook){
+    schema.post(hook,_DM_);
+  });
+  
+  ['findOneAndRemove','findOneAndUpdate','insertMany','update']
+  .forEach(function(hook){
+    schema.post(hook,_QM_);
+  });
 }
