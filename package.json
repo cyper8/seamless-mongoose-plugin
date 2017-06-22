@@ -1,6 +1,6 @@
 {
   "name": "seamless-mongoose-plugin",
-  "version": "0.0.1",
+  "version": "0.0.2-alpha",
   "description": "Mongoose plugin for Seamless data-binding client-side framework",
   "main": "seamless-mongoose-plugin.js",
   "module": "seamless-mongoose-plugin.js",
