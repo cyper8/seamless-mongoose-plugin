@@ -1,15 +1,15 @@
 #npm
 
-./node_modules
+node_modules
 
 #nvm
 
-./.nvmrc
+.nvmrc
 
 #c9
 
-./.c9
+.c9
 
 #mLab
 
-./test/.env
+test/.env
