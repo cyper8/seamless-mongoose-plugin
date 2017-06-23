@@ -14,11 +14,9 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   
     // buffer maintenance 
     var _garbageCollector = setInterval(function() {
-      console.log("GC: " + BUFFER_TTL);
       var i, c = 0;
       for (i in timestamp) {
         if ((Date.now() - timestamp[i]) > BUFFER_TTL) {
-          console.log(">>> Clearing " + i);
           delete databuf[i];
           delete queries[i];
           delete clients[i];
@@ -27,7 +25,6 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         }
         else c++;
       }
-      console.log(">>> " + c + " buffer records inspected");
       BUFFER_TTL = (-3 * c) + 21000;
     }, BUFFER_TTL);
     
@@ -66,9 +63,9 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   }
   
   function _resAdapter(data){
-    data = data._doc || data;
-    data = (data instanceof Array) ? data : [data];
-    return data;
+    data = (data instanceof Array)?data:[data];
+    return data.filter(function(d){return !!(d._id || d._doc)})
+      .map(function(d){ return d._doc || d });
   }
   
   function strfy(docs){
@@ -76,8 +73,8 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   }
   
   function mapall(A,B){
-    return A.reduce(function(C,a){
-      return B[a].reduce(function(c,b){
+    return (A||[]).reduce(function(C,a){
+      return (B[a]||[]).reduce(function(c,b){
         return (c.indexOf(b)==-1)?(c.concat(b)):c;
       },C);
     },[]);
@@ -156,13 +153,13 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var Model = this;
-    return mapall(changed_docs_ids,buffer.get(null,"requests"))
+    return Promise.all(mapall(changed_docs_ids,buffer.get(null,"requests"))
     .map(function(reqid){ // get requests objects
       var q;
       if (q=buffer.get(reqid,"queries"))
         return Model.find(q)
           .then(RespondTo(buffer.get(reqid,"clients"),reqid));
-    });
+    }));
   }; // returns an array of promises
   
   schema.statics.getData = function(reqid,query){
@@ -192,7 +189,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         .where('_id')
         .nin(body.map(function(e) {
           if (e._id) {
-            return e._id;
+            return e._id.toString();
           }
         }))
         .remove();
@@ -261,22 +258,35 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   };
   
   // document middleware
-  function _DM_(doc){
-    this.Model.notifyRegisteredClients(doc._id);
+  function _DM_(docs){
+    docs = _resAdapter(docs).map(function(d){return d._id.toString()});
+    var notify = (this.notifyRegisteredClients||
+                  this.constructor.notifyRegisteredClients||
+                  this.model.notifyRegisteredClients);
+    notify(docs)
+    .catch(function(reason){
+      console.error(reason);
+    });
   }
   
   // query middleware
   function _QM_(result){
-    var docs = _resAdapter(result);
-    schema.statics.notifyRegisteredClients.bind(this)
-    .call(this,docs.map(function(d){return d._id}));
+    var Model = this.model;
+    this.find().then(function(docs){
+      docs = _resAdapter(docs).map(function(d){return d._id.toString()});
+      Model.notifyRegisteredClients(docs)
+      .catch(function(reason){
+        console.error(reason);
+      });
+    });
   }
   
-  ['save','update'].forEach(function(hook){
+  ['save','remove','insertMany','findOneAndRemove']
+  .forEach(function(hook){
     schema.post(hook,_DM_);
   });
   
-  ['findOneAndRemove','findOneAndUpdate','insertMany','update']
+  ['findOneAndUpdate','update']
   .forEach(function(hook){
     schema.post(hook,_QM_);
   });
