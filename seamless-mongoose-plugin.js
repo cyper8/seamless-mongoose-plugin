@@ -1,6 +1,6 @@
 module.exports = exports = function SeamlessMongoosePlugin(schema){
   var buffer = Buffer();
-  
+
   // data buffer abstraction - to move it under redis and make plugin stateless
   // and work in multithreaded envs
   function Buffer(){
@@ -9,10 +9,10 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       clients = {}, // buffer with clients subscribed for a changes - per reqid
       requests = {}, // buffer with reqids - per document
       timestamp = {}; // buffer with timestamps of requests - per reqid
-    
+
     var BUFFER_TTL = 21000;
-  
-    // buffer maintenance 
+
+    // buffer maintenance
     var _garbageCollector = setInterval(function() {
       var i, c = 0;
       for (i in timestamp) {
@@ -27,7 +27,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
       BUFFER_TTL = (-3 * c) + 21000;
     }, BUFFER_TTL);
-    
+
     return {
       get(id,key){
         switch (key){
@@ -61,17 +61,17 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     }
   }
-  
+
   function _resAdapter(data){
     data = (data instanceof Array)?data:[data];
     return data.filter(function(d){return !!(d._id || d._doc)})
       .map(function(d){ return d._doc || d });
   }
-  
+
   function strfy(docs){
     return JSON.stringify((docs.length == 1)?docs[0]:docs);
   }
-  
+
   function mapall(A,B){
     return (A||[]).reduce(function(C,a){
       return (B[a]||[]).reduce(function(c,b){
@@ -79,7 +79,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       },C);
     },[]);
   }
-  
+
   function RespondTo(responses,reqid){
     if (responses.send) responses = [responses];
     return function(docs){
@@ -107,7 +107,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     };
   }
-  
+
   function HandleErrTo(response,reqid) {
     return function(err){
       SeamlessMongoosePlugin.deregisterClient(reqid,response);
@@ -119,7 +119,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       return;
     };
   }
-  
+
   SeamlessMongoosePlugin.registerClient = function(id, peer) {
     var c = buffer.get(id,"clients");
     if (c instanceof Array) {
@@ -136,7 +136,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       return true;
     }
   };
-  
+
   SeamlessMongoosePlugin.deregisterClient = function(id, peer) {
     var c = buffer.get(id,"clients");
     if (c && c.length) {
@@ -150,7 +150,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     }
   };
-  
+
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var Model = this;
     return Promise.all(mapall(changed_docs_ids,buffer.get(null,"requests"))
@@ -161,7 +161,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
           .then(RespondTo(buffer.get(reqid,"clients"),reqid));
     }));
   }; // returns an array of promises
-  
+
   schema.statics.getData = function(reqid,query){
     var b;
     if (b=buffer.get(reqid,"data")) return new Promise.resolve(b);
@@ -169,7 +169,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       return this.find(query);
     }
   } // return promise of data
-  
+
   schema.statics.postData = function(reqid,query,body){
     body = (body instanceof Array)?body:[body];
     var Model = this;
@@ -198,11 +198,11 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       return Model.find(query);
     });
   } // return promise of changed data
-  
+
   SeamlessMongoosePlugin.SeamlessHTTPEndpointFor = function (Model){
     return function(req,res,next){
       var reqid = req.path;
-      var query = buffer.set(reqid,"querie",req.params);
+      var query = buffer.set(reqid,"query",req.params);
       buffer.set(reqid,"timestamp",Date.now());
       switch (req.method){
         case "GET":
@@ -230,7 +230,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     };
   };
-  
+
   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
     return function(ws,req){
       var reqid = req.path;
@@ -256,7 +256,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       .catch(HandleErrTo(ws,reqid));
     };
   };
-  
+
   // document middleware
   function _DM_(docs){
     docs = _resAdapter(docs).map(function(d){return d._id.toString()});
@@ -268,7 +268,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       console.error(reason);
     });
   }
-  
+
   // query middleware
   function _QM_(result){
     var Model = this.model;
@@ -280,12 +280,12 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       });
     });
   }
-  
+
   ['save','remove','insertMany','findOneAndRemove']
   .forEach(function(hook){
     schema.post(hook,_DM_);
   });
-  
+
   ['findOneAndUpdate','update']
   .forEach(function(hook){
     schema.post(hook,_QM_);

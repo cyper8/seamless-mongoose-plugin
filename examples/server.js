@@ -1,7 +1,7 @@
 
 // var seamless = function SeamlessMongoosePlugin(schema){
 //   var buffer = Buffer();
-  
+
 //   // data buffer abstraction - to move it under redis and make plugin stateless
 //   // and work in multithreaded envs
 //   function Buffer(){
@@ -10,10 +10,10 @@
 //       clients = {}, // buffer with clients subscribed for a changes - per reqid
 //       requests = {}, // buffer with reqids - per document
 //       timestamp = {}; // buffer with timestamps of requests - per reqid
-    
+
 //     var BUFFER_TTL = 21000;
-  
-//     // buffer maintenance 
+
+//     // buffer maintenance
 //     var _garbageCollector = setInterval(function() {
 //       var i, c = 0;
 //       for (i in timestamp) {
@@ -28,7 +28,7 @@
 //       }
 //       BUFFER_TTL = (-3 * c) + 21000;
 //     }, BUFFER_TTL);
-    
+
 //     return {
 //       get(id,key){
 //         switch (key){
@@ -62,17 +62,17 @@
 //       }
 //     }
 //   }
-  
+
 //   function _resAdapter(data){
 //     data = (data instanceof Array)?data:[data];
 //     return data.filter(function(d){return !!(d._id || d._doc)})
 //       .map(function(d){ return d._doc || d });
 //   }
-  
+
 //   function strfy(docs){
 //     return JSON.stringify((docs.length == 1)?docs[0]:docs);
 //   }
-  
+
 //   function mapall(A,B){
 //     return (A||[]).reduce(function(C,a){
 //       return (B[a]||[]).reduce(function(c,b){
@@ -80,7 +80,7 @@
 //       },C);
 //     },[]);
 //   }
-  
+
 //   function RespondTo(responses,reqid){
 //     if (responses.send) responses = [responses];
 //     return function(docs){
@@ -108,7 +108,7 @@
 //       }
 //     };
 //   }
-  
+
 //   function HandleErrTo(response,reqid) {
 //     return function(err){
 //       SeamlessMongoosePlugin.deregisterClient(reqid,response);
@@ -120,7 +120,7 @@
 //       return;
 //     };
 //   }
-  
+
 //   SeamlessMongoosePlugin.registerClient = function(id, peer) {
 //     var c = buffer.get(id,"clients");
 //     if (c instanceof Array) {
@@ -137,7 +137,7 @@
 //       return true;
 //     }
 //   };
-  
+
 //   SeamlessMongoosePlugin.deregisterClient = function(id, peer) {
 //     var c = buffer.get(id,"clients");
 //     if (c && c.length) {
@@ -151,7 +151,7 @@
 //       }
 //     }
 //   };
-  
+
 //   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
 //     var Model = this;
 //     return Promise.all(mapall(changed_docs_ids,buffer.get(null,"requests"))
@@ -162,7 +162,7 @@
 //           .then(RespondTo(buffer.get(reqid,"clients"),reqid));
 //     }));
 //   }; // returns an array of promises
-  
+
 //   schema.statics.getData = function(reqid,query){
 //     var b;
 //     if (b=buffer.get(reqid,"data")) return new Promise.resolve(b);
@@ -170,7 +170,7 @@
 //       return this.find(query);
 //     }
 //   } // return promise of data
-  
+
 //   schema.statics.postData = function(reqid,query,body){
 //     body = (body instanceof Array)?body:[body];
 //     var Model = this;
@@ -199,7 +199,7 @@
 //       return Model.find(query);
 //     });
 //   } // return promise of changed data
-  
+
 //   SeamlessMongoosePlugin.SeamlessHTTPEndpointFor = function (Model){
 //     return function(req,res,next){
 //       var reqid = req.path;
@@ -231,7 +231,7 @@
 //       }
 //     };
 //   };
-  
+
 //   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
 //     return function(ws,req){
 //       var reqid = req.path;
@@ -257,7 +257,7 @@
 //       .catch(HandleErrTo(ws,reqid));
 //     };
 //   };
-  
+
 //   // document middleware
 //   function _DM_(docs){
 //     docs = _resAdapter(docs).map(function(d){return d._id.toString()});
@@ -269,7 +269,7 @@
 //       console.error(reason);
 //     });
 //   }
-  
+
 //   // query middleware
 //   function _QM_(result){
 //     var Model = this.model;
@@ -281,12 +281,12 @@
 //       });
 //     });
 //   }
-  
+
 //   ['save','remove','insertMany','findOneAndRemove']
 //   .forEach(function(hook){
 //     schema.post(hook,_DM_);
 //   });
-  
+
 //   ['findOneAndUpdate','update']
 //   .forEach(function(hook){
 //     schema.post(hook,_QM_);
@@ -296,7 +296,7 @@ var express = require('express'),
   bodyParser = require("body-parser"),
   jsonParser = bodyParser.json(),
   app = express(),
-  expressWs = require("express-ws")(app),
+  //expressWs = require("express-ws")(app),
   db = process.env.TEST_DB_URL || "mongodb://localhost/test",
   mongoose = require("mongoose"),
   SeamlessBackend = require("../seamless-mongoose-plugin.js");
@@ -323,7 +323,7 @@ app.use(bodyParser.urlencoded({
 
 app.use('/gtest/:_id', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
 
-app.ws('/test/:_id', SeamlessBackend.SeamlessWSEndpointFor(Test));
+//app.ws('/test/:_id', SeamlessBackend.SeamlessWSEndpointFor(Test));
 
 // app.use(express.static(`${__dirname}`, {
 //   maxAge: 1000
