@@ -82,6 +82,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   function RespondTo(responses,reqid){
     if (responses.send) responses = [responses];
+    console.log(responses);
     return function(docs){
       var data;
       if (typeof docs === "string"){
@@ -132,7 +133,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     }
     else {
       c = [peer];
-      buffer.set(id,"clients",c);
+      console.log("add: "+buffer.set(id,"clients",c));
       return true;
     }
   };
@@ -146,19 +147,25 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         if (!c.length) {
           c=null;
         }
-        buffer.set(id,"clients",c);
+        console.log("remove: "+buffer.set(id,"clients",c));
+        return true;
       }
     }
+    return false;
   };
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var Model = this;
-    return Promise.all(mapall(changed_docs_ids,buffer.get(null,"requests"))
+    console.log("changed",Date.now());
+    return Promise.all(mapall(changed_docs_ids,buffer.get(undefined,"requests"))
     .map(function(reqid){ // get requests objects
       var q;
-      if (q=buffer.get(reqid,"queries"))
+      console.log(reqid);
+      if (q=buffer.get(reqid,"queries")){
+        console.log(q);
         return Model.find(q)
           .then(RespondTo(buffer.get(reqid,"clients"),reqid));
+      }
     }));
   }; // returns an array of promises
 
@@ -201,25 +208,27 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   SeamlessMongoosePlugin.SeamlessHTTPEndpointFor = function (Model){
     return function(req,res,next){
-      var reqid = req.path;
+      var reqid = req.baseUrl+req.path;
       var query = buffer.set(reqid,"query",req.params);
-      buffer.set(reqid,"timestamp",Date.now());
+      res.isWebsocket = false;
+      console.log(reqid,buffer.set(reqid,"timestamp",Date.now()));
       switch (req.method){
         case "GET":
           return (
             (req.query.nopoll)?
-            (Model.getData(reqid,query)):
-            (new Promise(function(resolve,reject){
-                res.isWebsocket = false;
-                SeamlessMongoosePlugin.registerClient(reqid,res);
-                var timeout = setTimeout(function(){
-                  clearTimeout(timeout);
-                  resolve();
-                },29000);
-              }).then(function(){return Model.getData(reqid,query)}))
-          )
-          .then(RespondTo(res,reqid))
-          .catch(HandleErrTo(res,reqid));
+            (Model.getData(reqid,query)
+              .then(RespondTo(res,reqid))
+              .catch(HandleErrTo(res,reqid))):
+            (
+              res.writeHead(200),
+              SeamlessMongoosePlugin.registerClient(reqid,res),
+              setTimeout(function(){
+                if (SeamlessMongoosePlugin.deregisterClient(reqid,res)){
+                  res.end();
+                };
+              },29000)
+            )
+          );
         case "POST":
           SeamlessMongoosePlugin.registerClient(reqid,res);
           return Model.postData(reqid,query,req.body)
@@ -233,7 +242,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
     return function(ws,req){
-      var reqid = req.path;
+      var reqid = req.baseUrl+req.path;
       var query = buffer.set(reqid,"querie",req.params);
       buffer.set(reqid,"timestamp",Date.now());
       SeamlessMongoosePlugin.registerClient(reqid,ws);
