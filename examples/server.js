@@ -301,7 +301,8 @@ var express = require('express'),
   mongoose = require("mongoose"),
   SeamlessBackend = require("../seamless-mongoose-plugin.js");
 
-mongoose.connect(db);
+mongoose.Promise = global.Promise;
+mongoose.connect(db,{useMongoClient: true});
 
 var testSchema = mongoose.Schema({
   "type": String,
@@ -313,9 +314,9 @@ var testSchema = mongoose.Schema({
 
 testSchema.plugin(SeamlessBackend);
 
-var Test = mongoose.model(testSchema);
+var Test = mongoose.model("Test",testSchema);
 
-app.use(require("helmet")());
+//app.use(require("helmet")());
 app.use(jsonParser);
 app.use(bodyParser.urlencoded({
   extended: true
@@ -332,8 +333,8 @@ app.use('/gtest/:_id', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
 //   maxAge: 1000
 // }));
 
-app.listen(process.env.PORT, process.env.IP, function() {
-  console.log('Listening on ' + process.env.PORT);
+app.listen(process.env.PORT || 3000, process.env.IP || "127.0.0.1", function() {
+  console.log('Listening on ' + (process.env.PORT || 3000));
 });
 
 module.exports = {
