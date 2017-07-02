@@ -157,16 +157,18 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var Model = this;
     console.log("changed",Date.now());
-    return Promise.all(mapall(changed_docs_ids,buffer.get(undefined,"requests"))
-    .map(function(reqid){ // get requests objects
-      var q;
-      console.log(reqid);
-      if (q=buffer.get(reqid,"queries")){
-        console.log(q);
-        return Model.find(q)
-          .then(RespondTo(buffer.get(reqid,"clients"),reqid));
-      }
-    }));
+    return Promise.all(
+      mapall(changed_docs_ids,buffer.get(undefined,"requests"))
+      .map(function(reqid){ // get requests objects
+        var q;
+        console.log(reqid);
+        if (q=buffer.get(reqid,"queries")){
+          console.log(q);
+          return Model.find(q)
+            .then(RespondTo(buffer.get(reqid,"clients"),reqid));
+        }
+      })
+    );
   }; // returns an array of promises
 
   schema.statics.getData = function(reqid,query){
