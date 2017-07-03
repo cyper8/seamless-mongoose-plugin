@@ -19,7 +19,7 @@
     "nodejs"
   ],
   "peerDependencies": {
-    "mongoose": "^4.10.5",
+    "mongoose": "^4.11.0",
     "express": "^4.14.0"
   },
   "author": "Anton Yashchuk <anton.yashchuk@gmail.com>",

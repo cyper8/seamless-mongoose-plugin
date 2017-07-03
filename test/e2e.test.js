@@ -28,11 +28,11 @@ after(function(){
 describe("Seamless Mongoose Plugin",function(){
   this.slow(500);
   describe("express middleware for HTTP",function(){
-    it.skip(
+    it(
       "accepts immediate (nopoll) GET requests and answers them right away",
       function(){
         return request(app)
-                .get(`/gtest/${test._id}?nopoll=true`)
+                .get(`/gtest/${test._id.toString()}?nopoll=true`)
                 .set('Accept','application/json')
                 .expect(200)
                 .then(function(resp){
@@ -40,13 +40,13 @@ describe("Seamless Mongoose Plugin",function(){
                 });
       }
     )
-    it.skip(
+    it(
       "accepts polling GETS: holds for 29 secs and returns happy nothing",
       function(){
-        this.timeout(30000);
+        this.timeout(35000);
         this.slow(30000);
         return request(app)
-                .get(`/gtest/${test._id}`)
+                .get("/gtest/"+test._id.toString())
                 .set('Accept','application/json')
                 .expect(200)
                 .then(function(resp){
@@ -57,7 +57,7 @@ describe("Seamless Mongoose Plugin",function(){
     it(
       "accepts polling GETS: if change happens - it is returned",
       function(){
-        this.timeout(30000);
+        this.timeout(5000);
         this.slow(3000);
         var notifier = chai.spy.on(Test,"notifyRegisteredClients");
         var change = new Promise(function(resolve,reject){
@@ -65,17 +65,26 @@ describe("Seamless Mongoose Plugin",function(){
             resolve();
           },2000);
         })
-        .then(function(){test.count = 2;return test.save()})
+        .then(function(){
+          test.count = 2;
+          return test.save()
+        })
         .then(function(res){
           return expect(notifier).to.be.called();
         })
         var req = request(app)
-                .get("/gtest/"+test._id.toString())
+                .get(`/gtest/${test._id.toString()}`)
+                // .get(`/gtest/${test._id.toString()}?nopoll=true`)
                 .set('Accept','application/json')
                 .expect(200)
-                .then(function(resp){
-                  console.log(resp.body);
-                  return expect(resp.body._id).to.deep.equal(test._id) &&
+                // .then(function(){
+                //   return request(app)
+                //     .get("/gtest/"+test._id.toString())
+                //     .set('Accept','application/json')
+                //     .expect(200)
+                // })
+                .then(function(resp){;
+                  return expect(resp.body._id).to.deep.equal(test._id.toString()) &&
                         expect(resp.body.count).to.equal(2);
                 });
         return Promise.all([change,req]);

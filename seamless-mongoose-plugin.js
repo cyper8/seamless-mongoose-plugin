@@ -10,7 +10,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       requests = {}, // buffer with reqids - per document
       timestamp = {}; // buffer with timestamps of requests - per reqid
 
-    var BUFFER_TTL = 21000;
+    var BUFFER_TTL = 40000;
 
     // buffer maintenance
     var _garbageCollector = setInterval(function() {
@@ -25,7 +25,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         }
         else c++;
       }
-      BUFFER_TTL = (-3 * c) + 21000;
+      BUFFER_TTL = (-3 * c) + 40000;
     }, BUFFER_TTL);
 
     return {
@@ -82,7 +82,6 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   function RespondTo(responses,reqid){
     if (responses.send) responses = [responses];
-    console.log(responses);
     return function(docs){
       var data;
       if (typeof docs === "string"){
@@ -98,14 +97,12 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         if (!res.isWebsocket)
           SeamlessMongoosePlugin.deregisterClient(reqid,res);
       });
-      if (docs instanceof Array) {
-        docs.forEach(function(doc){
-          var r = buffer.get(doc._id,"requests");
-          if (r && r.indexOf && (r.indexOf(reqid) == -1)) {
-            buffer.set(doc._id,"requests",r.push(reqid));
-          }
-        });
-      }
+      docs.forEach(function(doc){
+        var r = buffer.get(doc._id,"requests") || [];
+        if (r.indexOf(reqid) == -1) {
+          buffer.set(doc._id,"requests",(r.push(reqid),r));
+        }
+      });
     };
   }
 
@@ -133,7 +130,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     }
     else {
       c = [peer];
-      console.log("add: "+buffer.set(id,"clients",c));
+      buffer.set(id,"clients",c);
       return true;
     }
   };
@@ -147,7 +144,6 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         if (!c.length) {
           c=null;
         }
-        console.log("remove: "+buffer.set(id,"clients",c));
         return true;
       }
     }
@@ -155,17 +151,15 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   };
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
-    var Model = this;
-    console.log("changed",Date.now());
+    var model = this;
     return Promise.all(
       mapall(changed_docs_ids,buffer.get(undefined,"requests"))
-      .map(function(reqid){ // get requests objects
+      .map(function(rid){ // get requests objects
         var q;
-        console.log(reqid);
-        if (q=buffer.get(reqid,"queries")){
-          console.log(q);
-          return Model.find(q)
-            .then(RespondTo(buffer.get(reqid,"clients"),reqid));
+        if (q=buffer.get(rid,"query")){
+          return model.find(q).exec()
+            .then(RespondTo(buffer.get(rid,"clients"),rid))
+            .catch(console.error);
         }
       })
     );
@@ -173,9 +167,9 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   schema.statics.getData = function(reqid,query){
     var b;
-    if (b=buffer.get(reqid,"data")) return new Promise.resolve(b);
+    if (b=buffer.get(reqid,"data")) return Promise.resolve(b);
     else {
-      return this.find(query);
+      return this.find(query).exec();
     }
   } // return promise of data
 
@@ -213,29 +207,36 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       var reqid = req.baseUrl+req.path;
       var query = buffer.set(reqid,"query",req.params);
       res.isWebsocket = false;
-      console.log(reqid,buffer.set(reqid,"timestamp",Date.now()));
       switch (req.method){
         case "GET":
-          return (
-            (req.query.nopoll)?
-            (Model.getData(reqid,query)
+          if (req.query.nopoll) {
+            return Model.getData(reqid,query)
               .then(RespondTo(res,reqid))
-              .catch(HandleErrTo(res,reqid))):
-            (
-              res.writeHead(200),
-              SeamlessMongoosePlugin.registerClient(reqid,res),
-              setTimeout(function(){
-                if (SeamlessMongoosePlugin.deregisterClient(reqid,res)){
-                  res.end();
-                };
-              },29000)
-            )
-          );
+              .catch(HandleErrTo(res,reqid));
+          }
+          else {
+            res.status(200);
+            if (SeamlessMongoosePlugin.registerClient(reqid,res)) {
+              return new Promise(function(resolve,reject){
+                setTimeout(function(){
+                  if (SeamlessMongoosePlugin.deregisterClient(reqid,res)){
+                    resolve(res.end());
+                  }
+                  else {
+                    reject(new Error("Responce has been deleted"));
+                  }
+                },29000);
+              }).then(function(){}).catch(console.error);
+            }
+            else {console.log("alreagy there")}
+          }
+          break;
         case "POST":
-          SeamlessMongoosePlugin.registerClient(reqid,res);
-          return Model.postData(reqid,query,req.body)
-          .then(RespondTo(buffer.get(reqid,"clients"),reqid))
-          .catch(HandleErrTo(res,reqid));
+          if (SeamlessMongoosePlugin.registerClient(reqid,res))
+            return Model.postData(reqid,query,req.body)
+            .then(RespondTo(buffer.get(reqid,"clients"),reqid))
+            .catch(HandleErrTo(res,reqid));
+          break;
         default:
           return next();
       }
@@ -245,7 +246,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
     return function(ws,req){
       var reqid = req.baseUrl+req.path;
-      var query = buffer.set(reqid,"querie",req.params);
+      var query = buffer.set(reqid,"query",req.params);
       buffer.set(reqid,"timestamp",Date.now());
       SeamlessMongoosePlugin.registerClient(reqid,ws);
       ws.on('message',function(message,flags){
@@ -271,24 +272,29 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   // document middleware
   function _DM_(docs){
     docs = _resAdapter(docs).map(function(d){return d._id.toString()});
-    var notify = (this.notifyRegisteredClients||
-                  this.constructor.notifyRegisteredClients||
-                  this.model.notifyRegisteredClients);
-    notify(docs)
-    .catch(function(reason){
-      console.error(reason);
-    });
+    var model;
+    if (this.model.notifyRegisteredClients){
+      model = this.model;
+    }
+    else if (this.constructor.notifyRegisteredClients) {
+      model = this.constructor;
+    }
+    else if (this.notifyRegisteredClients) {
+      model = this;
+    }
+    else return;
+    model.notifyRegisteredClients(docs)
+    .catch(console.error);
   }
 
   // query middleware
   function _QM_(result){
     var Model = this.model;
-    this.find().then(function(docs){
+    this.find()
+    .then(function(docs){
       docs = _resAdapter(docs).map(function(d){return d._id.toString()});
       Model.notifyRegisteredClients(docs)
-      .catch(function(reason){
-        console.error(reason);
-      });
+      .catch(console.error);
     });
   }
 
