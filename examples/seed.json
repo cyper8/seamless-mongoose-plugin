@@ -1,0 +1,32 @@
+[{
+  "_id": "100000000000000000000000",
+  "type": "greeting",
+  "count": 1,
+  "hoverable": false,
+  "message": "Hello!",
+  "addresee": "Bob"
+},
+{
+  "_id": "100000000000000000000001",
+  "type": "introduction",
+  "count": 1,
+  "hoverable": true,
+  "message": "I'm Seamless",
+  "addresee": "Bob"
+},
+{
+  "_id": "100000000000000000000002",
+  "type": "message",
+  "count": 3,
+  "hoverable": true,
+  "message": "I've been waiting for you",
+  "addresee": "Bob"
+},
+{
+  "_id": "100000000000000000000003",
+  "type": "writeoff",
+  "count": 1,
+  "hoverable": false,
+  "message": "So long!",
+  "addresee": "Bob"
+}]

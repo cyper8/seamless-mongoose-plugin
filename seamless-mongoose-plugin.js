@@ -16,7 +16,8 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     var _garbageCollector = setInterval(function() {
       var i, c = 0;
       for (i in timestamp) {
-        if ((Date.now() - timestamp[i]) > BUFFER_TTL) {
+        if (((Date.now() - timestamp[i]) > BUFFER_TTL) &&
+              !clients[i].length) {
           delete databuf[i];
           delete queries[i];
           delete clients[i];
@@ -91,17 +92,18 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         docs = _resAdapter(docs);
         data = buffer.set(reqid,"data",strfy(docs));
       }
-      responses.forEach(function(res){
-        if (res.type) res.type('application/json');
-        res.send(data);
-        if (!res.isWebsocket)
-          SeamlessMongoosePlugin.deregisterClient(reqid,res);
+      responses.forEach(function(r){
+        r.send(data);
       });
       docs.forEach(function(doc){
         var r = buffer.get(doc._id,"requests") || [];
         if (r.indexOf(reqid) == -1) {
-          buffer.set(doc._id,"requests",(r.push(reqid),r));
+          r.push(reqid);
+          buffer.set(doc._id,"requests",r);
         }
+      });
+      responses.forEach(function(r){
+        if (!r.isWebsocket) SeamlessMongoosePlugin.deregisterClient(reqid,r);
       });
     };
   }
@@ -118,36 +120,23 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     };
   }
 
-  SeamlessMongoosePlugin.registerClient = function(id, peer) {
-    var c = buffer.get(id,"clients");
-    if (c instanceof Array) {
-      if (c.indexOf(peer) == -1) {
-        c = c.concat(peer);
-        buffer.set(id,"clients",c);
-        return true;
-      }
-      return false;
-    }
-    else {
-      c = [peer];
-      buffer.set(id,"clients",c);
-      return true;
-    }
+  SeamlessMongoosePlugin.registerClient = function(rid, peer) {
+    var c = buffer.get(rid,"clients") || [];
+    c.push(peer);
+    buffer.set(rid,"clients",c);
+    return peer;
   };
 
-  SeamlessMongoosePlugin.deregisterClient = function(id, peer) {
-    var c = buffer.get(id,"clients");
-    if (c && c.length) {
-      var pos = c.indexOf(peer);
-      if (pos >= 0) {
-        c.splice(pos, 1);
-        if (!c.length) {
-          c=null;
-        }
-        return true;
+  SeamlessMongoosePlugin.deregisterClient = function(rid, response) {
+    var c;
+    if (c = buffer.get(rid,"clients")) {
+      var i;
+      while((i=c.indexOf(response))!=-1){
+        c.splice(i,1);
       }
+      buffer.set(rid,"clients",c);
     }
-    return false;
+    return response;
   };
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
@@ -188,9 +177,9 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         };
       }
     })).then(function(bwres) {
-      return Model.find(query)
-        .where('_id')
-        .nin(body.map(function(e) {
+      return Model.find()
+        .where(query)
+        .nin('_id',body.map(function(e) {
           if (e._id) {
             return e._id.toString();
           }
@@ -206,9 +195,11 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     return function(req,res,next){
       var reqid = req.baseUrl+req.path;
       var query = buffer.set(reqid,"query",req.params);
-      res.isWebsocket = false;
       switch (req.method){
         case "GET":
+          res.timestamp = buffer.set(reqid,"timestamp",Date.now());
+          res.type('json');
+          res.isWebsocket = false;
           if (req.query.nopoll) {
             return Model.getData(reqid,query)
               .then(RespondTo(res,reqid))
@@ -216,25 +207,32 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
           }
           else {
             res.status(200);
-            if (SeamlessMongoosePlugin.registerClient(reqid,res)) {
-              return new Promise(function(resolve,reject){
-                setTimeout(function(){
-                  if (SeamlessMongoosePlugin.deregisterClient(reqid,res)){
-                    resolve(res.end());
-                  }
-                  else {
-                    reject(new Error("Responce has been deleted"));
-                  }
-                },29000);
-              }).then(function(){}).catch(console.error);
-            }
-            else {console.log("alreagy there")}
+            SeamlessMongoosePlugin.registerClient(reqid,res);
+            return new Promise(function(resolve,reject){
+              setTimeout(function(){
+                if (!res.finished){
+                  resolve(SeamlessMongoosePlugin.deregisterClient(reqid,res).end());
+                }
+                else {
+                  resolve();
+                }
+              },29000);
+            }).catch(console.error);
           }
           break;
         case "POST":
-          if (SeamlessMongoosePlugin.registerClient(reqid,res))
-            return Model.postData(reqid,query,req.body)
-            .then(RespondTo(buffer.get(reqid,"clients"),reqid))
+          res.timestamp = buffer.set(reqid,"timestamp",Date.now());
+          res.type('json');
+          res.isWebsocket = false;
+          SeamlessMongoosePlugin.registerClient(reqid,res);
+          return Model.postData(reqid,query,req.body)
+            .then(function(docs){
+              return Model.notifyRegisteredClients(
+                docs.map(function(d){
+                  return d._id+"";
+                })
+              );
+            })
             .catch(HandleErrTo(res,reqid));
           break;
         default:
@@ -247,12 +245,19 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     return function(ws,req){
       var reqid = req.baseUrl+req.path;
       var query = buffer.set(reqid,"query",req.params);
-      buffer.set(reqid,"timestamp",Date.now());
+      ws.timestamp = buffer.set(reqid,"timestamp",Date.now());
+      ws.isWebsocket = true;
       SeamlessMongoosePlugin.registerClient(reqid,ws);
       ws.on('message',function(message,flags){
         if (!flags.binary){
           Model.postData(reqid,query,JSON.parse(message))
-          .then(RespondTo(ws,reqid))
+          .then(function(docs){
+            return Model.notifyRegisteredClients(
+              docs.map(function(d){
+                return d._id+"";
+              })
+            );
+          })
           .catch(HandleErrTo(ws,reqid));
         }
       });
