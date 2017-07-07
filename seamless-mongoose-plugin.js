@@ -105,6 +105,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       responses.forEach(function(r){
         if (!r.isWebsocket) SeamlessMongoosePlugin.deregisterClient(reqid,r);
       });
+      return docs;
     };
   }
 
@@ -115,8 +116,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         response.status(500).send('Error querying: ' + err.toString());
       }
       else response.close(500, 'Error querying: ' + err.toString());
-      console.error(err);
-      return;
+      return console.error(err);
     };
   }
 
@@ -141,9 +141,10 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var model = this;
-    return Promise.all(
-      mapall(changed_docs_ids,buffer.get(undefined,"requests"))
-      .map(function(rid){ // get requests objects
+    var changedreqs = mapall(changed_docs_ids,buffer.get(undefined,"requests"));
+    var results = [];
+    if (changedreqs.length) { 
+      results = changedreqs.map(function (rid){
         var q;
         if (q=buffer.get(rid,"query")){
           return model.find(q).exec()
@@ -151,7 +152,19 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
             .catch(console.error);
         }
       })
-    );
+    }
+    else {
+      var qs = buffer.get(undefined,"query");
+      var rid;
+      for (rid in qs){
+        results.push(
+          model.find(qs[rid]).exec()
+          .then(RespondTo(buffer.get(rid,"clients"),rid))
+          .catch(console.error)
+        )
+      }
+    }
+    return Promise.all(results);
   }; // returns an array of promises
 
   schema.statics.getData = function(reqid,query){

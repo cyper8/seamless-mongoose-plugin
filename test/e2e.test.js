@@ -9,10 +9,48 @@ var expect = chai.expect;
 //var assert = chai.assert;
 
 var Test = test_context.Test; // model
+var notifier = chai.spy.on(Test,"notifyRegisteredClients");
 var app = test_context.app;
 var seamless = test_context.SeamlessBackend;
 var testproto = {type:"review",count:1,hoverable:false,message:"Foo!",addresee:"Bob"};
 var test;
+
+function* hooksGen(){
+  var test2;
+  yield Test
+    .create((testproto.message="Wow!",testproto))
+    .then(function(doc){
+      return test2 = doc;
+    });                                                                   // save
+  yield Test.insertMany([
+    {type:"review",count:1,hoverable:false,message:"Boo!",addresee:"Bob"},
+    {type:"review",count:1,hoverable:false,message:"Soo?",addresee:"Bob"},
+    {type:"review",count:1,hoverable:false,message:"Noo!",addresee:"Bob"}
+  ]).then(function(docs){return docs});                             // insertMany
+  yield Test.findOneAndRemove({message:"Boo!"})
+    .then(function(doc){return doc});                         // findOneAndRemove
+  yield Test.findOneAndUpdate({message:"Foo!"},{count:2},{new:true}); 
+                                                              // findOneAndUpdate
+  yield Test.where({addresee:"Bob"}).update({count:2},{multi:true});    // update
+  yield test2.remove();                                                 // remove
+}
+
+function* requestGen(){
+  while(true){
+    yield request(app)
+      .get('/gtest/for/Bob')
+      .set('Accept','application/json');
+  }
+}
+
+['save','insertMany','findOneAndRemove','findOneAndUpdate','update','remove']
+.forEach(function(task){
+  it(task,function(){
+    return Promise.all([
+      
+    ])
+  })
+})
 
 before(function(){
   return Test.create(testproto)
@@ -77,7 +115,7 @@ describe("Seamless Mongoose Plugin",function(){
       function(){
         this.timeout(5000);
         this.slow(3000);
-        var notifier = chai.spy.on(Test,"notifyRegisteredClients");
+        
         var change = new Promise(function(resolve,reject){
           setTimeout(function(){
             resolve();

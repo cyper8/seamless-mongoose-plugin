@@ -19,7 +19,10 @@ var testSchema = mongoose.Schema({
   "count": Number,
   "hoverable": Boolean,
   "message": String,
-  "addresee": String
+  "addresee": {
+    type:String,
+    index: true
+  }
 });
 
 testSchema.plugin(SeamlessBackend);
@@ -40,6 +43,8 @@ app.use(bodyParser.urlencoded({
 }));
 
 app.use('/gtest/:_id', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
+
+app.use('/gtest/for/:addresee', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
 
 //app.ws('/test/:_id', SeamlessBackend.SeamlessWSEndpointFor(Test));
 
