@@ -1,5 +1,4 @@
 module.exports = exports = function SeamlessMongoosePlugin(schema){
-  var buffer = Buffer();
 
   // data buffer abstraction - to move it under redis and make plugin stateless
   // and work in multithreaded envs
@@ -12,7 +11,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
     var BUFFER_TTL = 40000;
 
-    // buffer maintenance
+    // buffer maintenance timer
     var _garbageCollector = setInterval(function() {
       var i, c = 0;
       for (i in timestamp) {
@@ -62,15 +61,32 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     }
   }
+  
+  function wrapA(value){
+    if (Array.isArray(value)){
+      return value;
+    }
+    else {
+      return [value];
+    }
+  }
+  
+  function unwrapFirstFromA(arr){
+    if (Array.isArray(arr) || (arr[0] != undefined)){
+      return arr[0];
+    }
+    else {
+      return arr;
+    }
+  }
 
-  function _resAdapter(data){
-    data = (data instanceof Array)?data:[data];
-    return data.filter(function(d){return !!(d._id || d._doc)})
+  function getDocsFrom(data){
+    return wrapA(data).filter(function(d){return !!(d._id || d._doc)})
       .map(function(d){ return d._doc || d });
   }
 
   function strfy(docs){
-    return JSON.stringify((docs.length == 1)?docs[0]:docs);
+    return JSON.stringify(unwrapFirstFromA(docs));
   }
 
   function mapall(A,B){
@@ -82,14 +98,14 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   }
 
   function RespondTo(responses,reqid){
-    if (responses.send) responses = [responses];
+    responses = wrapA(responses);
     return function(docs){
       var data;
       if (typeof docs === "string"){
         data = docs;
       }
       else {
-        docs = _resAdapter(docs);
+        docs = getDocsFrom(docs);
         data = buffer.set(reqid,"data",strfy(docs));
       }
       responses.forEach(function(r){
@@ -119,6 +135,37 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       return console.error(err);
     };
   }
+  
+  // document middleware
+  function _DM_(docs){
+    docs = getDocsFrom(docs).map(function(d){return d._id.toString()});
+    var model;
+    if (this.model.notifyRegisteredClients){
+      model = this.model;
+    }
+    else if (this.constructor.notifyRegisteredClients) {
+      model = this.constructor;
+    }
+    else if (this.notifyRegisteredClients) {
+      model = this;
+    }
+    else return;
+    model.notifyRegisteredClients(docs)
+    .catch(console.error);
+  }
+
+  // query middleware
+  function _QM_(result){
+    var Model = this.model;
+    this.find()
+    .then(function(docs){
+      docs = getDocsFrom(docs).map(function(d){return d._id.toString()});
+      Model.notifyRegisteredClients(docs)
+      .catch(console.error);
+    });
+  }
+
+  var buffer = Buffer();
 
   SeamlessMongoosePlugin.registerClient = function(rid, peer) {
     var c = buffer.get(rid,"clients") || [];
@@ -176,7 +223,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   } // return promise of data
 
   schema.statics.postData = function(reqid,query,body){
-    body = (body instanceof Array)?body:[body];
+    body = wrapA(body);
     var Model = this;
     return this.bulkWrite(body.map(function(e) {
       if (e._id) {
@@ -204,6 +251,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     });
   } // return promise of changed data
 
+  // HTTP endpoint middleware factory
   SeamlessMongoosePlugin.SeamlessHTTPEndpointFor = function (Model){
     return function(req,res,next){
       var reqid = req.baseUrl+req.path;
@@ -254,6 +302,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     };
   };
 
+  // Web Socket endpoint middleware factory
   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
     return function(ws,req){
       var reqid = req.baseUrl+req.path;
@@ -287,35 +336,9 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     };
   };
 
-  // document middleware
-  function _DM_(docs){
-    docs = _resAdapter(docs).map(function(d){return d._id.toString()});
-    var model;
-    if (this.model.notifyRegisteredClients){
-      model = this.model;
-    }
-    else if (this.constructor.notifyRegisteredClients) {
-      model = this.constructor;
-    }
-    else if (this.notifyRegisteredClients) {
-      model = this;
-    }
-    else return;
-    model.notifyRegisteredClients(docs)
-    .catch(console.error);
-  }
 
-  // query middleware
-  function _QM_(result){
-    var Model = this.model;
-    this.find()
-    .then(function(docs){
-      docs = _resAdapter(docs).map(function(d){return d._id.toString()});
-      Model.notifyRegisteredClients(docs)
-      .catch(console.error);
-    });
-  }
-
+  // setting hooks
+  
   ['save','remove','insertMany','findOneAndRemove']
   .forEach(function(hook){
     schema.post(hook,_DM_);
