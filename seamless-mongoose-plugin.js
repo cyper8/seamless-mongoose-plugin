@@ -256,11 +256,11 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     return function(req,res,next){
       var reqid = req.baseUrl+req.path;
       var query = buffer.set(reqid,"query",req.params);
+      res.timestamp = buffer.set(reqid,"timestamp",Date.now());
+      res.type('json');
+      res.isWebsocket = false;
       switch (req.method){
         case "GET":
-          res.timestamp = buffer.set(reqid,"timestamp",Date.now());
-          res.type('json');
-          res.isWebsocket = false;
           if (req.query.nopoll) {
             return Model.getData(reqid,query)
               .then(RespondTo(res,reqid))
@@ -280,11 +280,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
               },29000);
             }).catch(console.error);
           }
-          break;
         case "POST":
-          res.timestamp = buffer.set(reqid,"timestamp",Date.now());
-          res.type('json');
-          res.isWebsocket = false;
           SeamlessMongoosePlugin.registerClient(reqid,res);
           return Model.postData(reqid,query,req.body)
             .then(function(docs){
@@ -295,7 +291,6 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
               );
             })
             .catch(HandleErrTo(res,reqid));
-          break;
         default:
           return next();
       }
