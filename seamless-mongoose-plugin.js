@@ -1,65 +1,23 @@
+const murmur = require("murmurhash-js").murmur2;
+const uuid = require("./uuid.js");
+const Cache = require("./cache.js");
+
 module.exports = exports = function SeamlessMongoosePlugin(schema){
-
-  // data buffer abstraction - to move it under redis and make plugin stateless
-  // and work in multithreaded envs
-  function Buffer(){
-    var databuf = {}, // buffer with stringified responses - per reqid
-      queries = {}, // buffer with queries - per reqid
-      clients = {}, // buffer with clients subscribed for a changes - per reqid
-      requests = {}, // buffer with reqids - per document
-      timestamp = {}; // buffer with timestamps of requests - per reqid
-
-    var BUFFER_TTL = 40000;
-
-    // buffer maintenance timer
-    var _garbageCollector = setInterval(function() {
-      var i, c = 0;
-      for (i in timestamp) {
-        if (((Date.now() - timestamp[i]) > BUFFER_TTL) &&
-              !clients[i].length) {
-          delete databuf[i];
-          delete queries[i];
-          delete clients[i];
-          delete timestamp[i];
-          // TODO: need to clear requests
-        }
-        else c++;
+  
+  var buffer = Cache();
+  var clients = {};
+  
+  function _hash(q){
+    if (typeof q === "object") {
+      try {
+        q = JSON.stringify(q);
       }
-      BUFFER_TTL = (-3 * c) + 40000;
-    }, BUFFER_TTL);
-
-    return {
-      get(id,key){
-        switch (key){
-          case "data":
-            return id?databuf[id]:databuf;
-          case "query":
-            return id?queries[id]:queries;
-          case "clients":
-            return id?clients[id]:clients;
-          case "requests":
-            return id?requests[id]:requests;
-          case "timestamp":
-            return id?timestamp[id]:timestamp;
-          default:
-            return (BUFFER_TTL-21000)/(-3); // count of unique requests
-        }
-      },
-      set(id,key,v){
-        switch (key){
-          case "data":
-            return v?databuf[id]=v:delete databuf[id];
-          case "query":
-            return v?queries[id]=v:delete queries[id];
-          case "clients":
-            return v?clients[id]=v:delete clients[id];
-          case "requests":
-            return v?requests[id]=v:delete requests[id];
-          case "timestamp":
-            return v?timestamp[id]=v:delete timestamp[id];
-        }
+      catch (err) {
+        throw err;
       }
     }
+    if (typeof q === "string") return murmur(q||"");
+    else throw new TypeError("argument is not convertible to string");
   }
   
   function wrapA(value){
@@ -85,60 +43,74 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       .map(function(d){ return d._doc || d });
   }
 
-  function strfy(docs){
-    return JSON.stringify(unwrapFirstFromA(docs));
+  function CacheData(reqid){
+    return function (docs){
+      try {
+        buffer.set(reqid,"data",JSON.stringify(docs));
+      }
+      catch(error){
+        console.error(error);
+      }
+      finally{
+        return docs
+      }
+    }
   }
-
-  function mapall(A,B){
-    return (A||[]).reduce(function(C,a){
-      return (B[a]||[]).reduce(function(c,b){
-        return (c.indexOf(b)==-1)?(c.concat(b)):c;
-      },C);
-    },[]);
+  
+  function CacheReqsByDocs(reqid){
+    return function(docs){
+      Promise.all(
+        docs
+        .map(function(d){return d._id.toString()})
+        .map(function(did){
+          return buffer.get(did,"requests")
+            .then(function(r){
+              if (r.indexOf(reqid) == -1) {
+                r.push(reqid);
+                return buffer.set(did,"requests",r);
+              }
+            });
+        })
+      );
+      return docs;
+    }
   }
-
+  
+  function CacheQuery(reqid,query){
+    if (typeof query === "object") query = JSON.stringify(query);
+    return buffer.set(reqid,"query",query);
+  }
+  
   function RespondTo(responses,reqid){
     responses = wrapA(responses);
     return function(docs){
-      var data;
-      if (typeof docs === "string"){
-        data = docs;
-      }
-      else {
-        docs = getDocsFrom(docs);
-        data = buffer.set(reqid,"data",strfy(docs));
-      }
       responses.forEach(function(r){
-        r.send(data);
-      });
-      docs.forEach(function(doc){
-        var r = buffer.get(doc._id,"requests") || [];
-        if (r.indexOf(reqid) == -1) {
-          r.push(reqid);
-          buffer.set(doc._id,"requests",r);
+        r.type('json');
+        r.send(docs);
+        if (!r.isWebsocket){
+          deregisterClient(reqid,r.id);
         }
-      });
-      responses.forEach(function(r){
-        if (!r.isWebsocket) SeamlessMongoosePlugin.deregisterClient(reqid,r);
       });
       return docs;
     };
   }
 
-  function HandleErrTo(response,reqid) {
+  function HandleErrTo(responses,reqid) {
+    responses = wrapA(responses)
     return function(err){
-      SeamlessMongoosePlugin.deregisterClient(reqid,response);
-      if (response.status) {
-        response.status(500).send('Error querying: ' + err.toString());
-      }
-      else response.close(500, 'Error querying: ' + err.toString());
-      return console.error(err);
+      responses.forEach(function(r){
+        if (r.status) {
+          r.status(500).send('Error querying: ' + err.toString());
+        }
+        else r.close(500, 'Error querying: ' + err.toString());
+        deregisterClient(reqid,r);
+      });
     };
   }
   
   // document middleware
   function _DM_(docs){
-    docs = getDocsFrom(docs).map(function(d){return d._id.toString()});
+    var docids = getDocsFrom(docs).map(function(d){return d._id.toString()});
     var model;
     if (this.model.notifyRegisteredClients){
       model = this.model;
@@ -150,81 +122,108 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       model = this;
     }
     else return;
-    model.notifyRegisteredClients(docs)
+    model.notifyRegisteredClients(docids)
     .catch(console.error);
   }
 
   // query middleware
   function _QM_(result){
     var Model = this.model;
-    this.find()
+    this.find().exec()
+    .then(getDocsFrom)
     .then(function(docs){
-      docs = getDocsFrom(docs).map(function(d){return d._id.toString()});
-      Model.notifyRegisteredClients(docs)
+      Model.notifyRegisteredClients(docs.map(function(d){return d._id.toString()}))
       .catch(console.error);
     });
   }
 
-  var buffer = Buffer();
-
-  SeamlessMongoosePlugin.registerClient = function(rid, peer) {
-    var c = buffer.get(rid,"clients") || [];
-    c.push(peer);
-    buffer.set(rid,"clients",c);
-    return peer;
+  function registerClient(rid, peer) {
+    if (!clients[rid]) clients[rid] = {};
+    var id = peer.id = uuid();
+    clients[rid][id] = peer;
+    return id;
   };
 
-  SeamlessMongoosePlugin.deregisterClient = function(rid, response) {
-    var c;
-    if (c = buffer.get(rid,"clients")) {
-      var i;
-      while((i=c.indexOf(response))!=-1){
-        c.splice(i,1);
+  function deregisterClient(rid, peerid) {
+    if (clients[rid]){
+      if (clients[rid][peerid]){
+        delete clients[rid[peerid]];
       }
-      buffer.set(rid,"clients",c);
     }
-    return response;
   };
+
+  schema.statics.registerClient = registerClient;
+  
+  schema.statics.deregisterClient = deregisterClient;
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var model = this;
-    var changedreqs = mapall(changed_docs_ids,buffer.get(undefined,"requests"));
-    var results = [];
-    if (changedreqs.length) { 
-      results = changedreqs.map(function (rid){
-        var q;
-        if (q=buffer.get(rid,"query")){
-          return model.find(q).exec()
-            .then(RespondTo(buffer.get(rid,"clients"),rid))
-            .catch(console.error);
-        }
-      })
-    }
-    else {
-      var qs = buffer.get(undefined,"query");
-      var rid;
-      for (rid in qs){
-        results.push(
-          model.find(qs[rid]).exec()
-          .then(RespondTo(buffer.get(rid,"clients"),rid))
-          .catch(console.error)
-        )
-      }
-    }
-    return Promise.all(results);
-  }; // returns an array of promises
+    return Promise.all(changed_docs_ids.map(function(did){
+      return buffer.get(did,"requests")
+    }))
+    .then(function(reqids){
+      reqids = [].concat.apply([],reqids) // flatten 2 layer deep array of change-affected reqids to 1 layer 
+        .filter(function(e,i,a){return a.indexOf(e) === i}); // and filter unique
+      return Promise.all(reqids.map(function (rid){
+        return buffer.get(rid,"query") //get a query string for each reqid
+          .then(function(q){
+            if (q) { // if there is a query cached for this reqid - perform it and
+              return model.find(q).exec()
+                .then(getDocsFrom)
+                .then(RespondTo(clients[rid],rid),HandleErrTo(clients[rid],rid)) // respond to all registered clients of this reqid
+                .then(CacheData(rid)) // Cache responses
+                .then(CacheReqsByDocs(rid))
+                .catch(console.error);
+            }
+          })
+          .catch(console.error);
+      }));
+    })
+    .catch(console.error);
+  };
 
-  schema.statics.getData = function(reqid,query){
-    var b;
-    if (b=buffer.get(reqid,"data")) return Promise.resolve(b);
-    else {
-      return this.find(query).exec();
-    }
-  } // return promise of data
-
-  schema.statics.postData = function(reqid,query,body){
-    body = wrapA(body);
+  schema.statics.getData = function(rid,query,response){
     var Model = this;
+    return buffer.get(rid,"data")
+      .then(function(data){
+        return JSON.parse(data);
+      })
+      .then(RespondTo(response,rid))
+      .catch(function(){
+        return Model.find(query).exec()
+          .then(getDocsFrom)
+          .then(RespondTo(response,rid),HandleErrTo(response, rid))
+          .then(CacheData(rid))
+          .then(CacheReqsByDocs(rid))
+          .then(function(){
+            CacheQuery(rid,query);
+          })
+          .catch(console.error);
+      });
+  }
+  
+  schema.statics.pollData = function(rid,query,response){
+    response.status(200);
+    return CacheQuery(rid,query)
+    .then(function(){
+      var id = registerClient(rid,response);
+      return new Promise(function(resolve,reject){
+        setTimeout(function(){
+          if (!response.finished){
+            response.end();
+          }
+          deregisterClient(rid,id);
+          resolve();
+        },29000);
+      }).catch(console.error);
+    })
+  }
+
+  schema.statics.postData = function(reqid,query,body,response){
+    body = wrapA(body);
+    var docids;
+    var Model = this;
+    if (response) Model.registerClient(reqid,response);
     return this.bulkWrite(body.map(function(e) {
       if (e._id) {
         return {
@@ -236,61 +235,44 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
           }
         };
       }
-    })).then(function(bwres) {
-      return Model.find()
-        .where(query)
-        .nin('_id',body.map(function(e) {
-          if (e._id) {
-            return e._id.toString();
+      else {
+        return {
+          insertOne: {
+            document: e
           }
-        }))
-        .remove();
+        }
+      }
+    }))
+    .then(function(bwres) {
+      docids = body.map(function(e){return e._id}).concat(Object.values(bwres.insertedIds));
+      return Model.find(query)
+        .where('_id')
+        .nin(docids)
+        .remove()
+        .exec()
+        .then(function(){
+          Model.notifyRegisteredClients(docids);
+        });
     })
-    .then(function(wopres){
-      return Model.find(query);
-    });
-  } // return promise of changed data
+    .catch(console.error);
+  }
 
   // HTTP endpoint middleware factory
   SeamlessMongoosePlugin.SeamlessHTTPEndpointFor = function (Model){
     return function(req,res,next){
-      var reqid = req.baseUrl+req.path;
-      var query = buffer.set(reqid,"query",req.params);
-      res.timestamp = buffer.set(reqid,"timestamp",Date.now());
-      res.type('json');
+      var reqid = _hash(req.baseUrl+req.path);
+      var query = req.params;
       res.isWebsocket = false;
       switch (req.method){
         case "GET":
           if (req.query.nopoll) {
-            return Model.getData(reqid,query)
-              .then(RespondTo(res,reqid))
-              .catch(HandleErrTo(res,reqid));
+            return Model.getData(reqid,query,res);
           }
           else {
-            res.status(200);
-            SeamlessMongoosePlugin.registerClient(reqid,res);
-            return new Promise(function(resolve,reject){
-              setTimeout(function(){
-                if (!res.finished){
-                  resolve(SeamlessMongoosePlugin.deregisterClient(reqid,res).end());
-                }
-                else {
-                  resolve();
-                }
-              },29000);
-            }).catch(console.error);
+            return Model.pollData(reqid,query,res);
           }
         case "POST":
-          SeamlessMongoosePlugin.registerClient(reqid,res);
-          return Model.postData(reqid,query,req.body)
-            .then(function(docs){
-              return Model.notifyRegisteredClients(
-                docs.map(function(d){
-                  return d._id+"";
-                })
-              );
-            })
-            .catch(HandleErrTo(res,reqid));
+          return Model.postData(reqid,query,req.body,res);
         default:
           return next();
       }
@@ -300,34 +282,23 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   // Web Socket endpoint middleware factory
   SeamlessMongoosePlugin.SeamlessWSEndpointFor = function(Model){
     return function(ws,req){
-      var reqid = req.baseUrl+req.path;
-      var query = buffer.set(reqid,"query",req.params);
-      ws.timestamp = buffer.set(reqid,"timestamp",Date.now());
+      var reqid = _hash(req.baseUrl+req.path);
+      var query = req.params;
       ws.isWebsocket = true;
-      SeamlessMongoosePlugin.registerClient(reqid,ws);
+      var wsid = Model.registerClient(reqid,ws);
       ws.on('message',function(message,flags){
         if (!flags.binary){
-          Model.postData(reqid,query,JSON.parse(message))
-          .then(function(docs){
-            return Model.notifyRegisteredClients(
-              docs.map(function(d){
-                return d._id+"";
-              })
-            );
-          })
-          .catch(HandleErrTo(ws,reqid));
+          Model.postData(reqid,query,JSON.parse(message));
         }
       });
       ws.on('close',function(code,reason){
-        SeamlessMongoosePlugin.deregisterClient(reqid,ws);
+        Model.deregisterClient(reqid,wsid);
       });
       ws.on('error',function(error){
         console.error(error);
         ws.close(500,error);
       });
-      Model.getData(reqid,query)
-      .then(RespondTo(ws,reqid))
-      .catch(HandleErrTo(ws,reqid));
+      Model.getData(reqid,query,ws);
     };
   };
 
