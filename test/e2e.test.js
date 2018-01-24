@@ -17,8 +17,9 @@ var test;
 
 function* hooksGen(){
   var test2;
+  var testproto2 = Object.assign({},testproto);
   yield Test
-    .create((testproto.message="Wow!",testproto))
+    .create((testproto2.message="Wow!",testproto2))
     .then(function(doc){
       return test2 = doc;
     });                                                                   // save
@@ -29,7 +30,7 @@ function* hooksGen(){
   ]).then(function(docs){return docs});                             // insertMany
   yield Test.findOneAndRemove({message:"Boo!"})
     .then(function(doc){return doc});                         // findOneAndRemove
-  yield Test.findOneAndUpdate({message:"Foo!"},{count:2},{new:true}); 
+  yield Test.findOneAndUpdate({message:"Foo!"},{count:2},{new:true});
                                                               // findOneAndUpdate
   yield Test.where({addresee:"Bob"}).update({count:2},{multi:true});    // update
   yield test2.remove();                                                 // remove
@@ -58,37 +59,23 @@ function* requestGen(){
 var testcasegen = hooksGen();
 var testsgen = requestGen();
 
-['save','insertMany','findOneAndRemove','findOneAndUpdate','update','remove']
-.forEach(function(task){
-  it(task,function(){
-    return Promise.all([
-      timePad(1000).then(testcasegen.next)
-      .then(function(testcase){
-        return testcase.value;
-      }),
-      testsgen.next().value
-    ])
-    .then(function(testset){
-      console.log(testset);
-      return expect(testset[0]).to.deep.include(testset[1]);
-    });
-  });
-});
-
-before(function(){
-  return Test.create(testproto)
-    .then(function(doc){
-      test = doc;
-    });
-});
-
-after(function(){
-  test.remove();
-});
-
 describe("Seamless Mongoose Plugin",function(){
   this.slow(500);
+  var test;
+
   describe("express middleware for HTTP",function(){
+    beforeEach(function(){
+      this.timeout(5000);
+      return Test.create(testproto)
+        .then(function(doc){
+          test = doc;
+        });
+    });
+
+    afterEach(function(){
+      test.remove();
+    });
+
     it(
       "accepts immediate (nopoll) GET requests and answers them right away",
       function(){
@@ -97,14 +84,15 @@ describe("Seamless Mongoose Plugin",function(){
                 .set('Accept','application/json')
                 .expect(200)
                 .then(function(resp){
-                  return expect(resp.body).to.deep.include(testproto);
+                  return expect(resp.body.length).to.equal(1) &&
+                    expect(resp.body[0]._id).to.equal(test._id.toString());
                 });
       }
     );
     it(
       "accepts POST requests and returns changed objects",
       function(){
-        var change = testproto;
+        var change = Object.assign({},testproto);
         change.count = 2;
         change._id = test._id.toString();
         return request(app)
@@ -114,8 +102,9 @@ describe("Seamless Mongoose Plugin",function(){
           .send(change)
           .expect(200)
           .then(function(resp){
-            return expect(resp.body).to.be.not.empty &&
-              expect(resp.body).to.deep.include(change);
+            return expect(resp.body.length).to.equal(1) &&
+              expect(resp.body[0]._id).to.equal(change._id) &&
+              expect(resp.body[0].count).to.equal(2);
           })
       }
     );
@@ -138,7 +127,7 @@ describe("Seamless Mongoose Plugin",function(){
       function(){
         this.timeout(5000);
         this.slow(3000);
-        
+
         var change = new Promise(function(resolve,reject){
           setTimeout(function(){
             resolve();
@@ -185,7 +174,7 @@ describe("Seamless Mongoose Plugin",function(){
           },2000);
         })
         .then(function(){
-          var t = testproto;
+          var t = Object.assign({},testproto);
           t.count = 2;
           t._id = test._id.toString();
           return request(app)
@@ -217,5 +206,24 @@ describe("Seamless Mongoose Plugin",function(){
         return Promise.all([change,req]);
       }
     );
+  });
+
+  describe("Mongoose hooks trigger responses", function(){
+    ['save','insertMany','findOneAndRemove','findOneAndUpdate','update','remove']
+    .forEach(function(task){
+      it(task,function(){
+        return Promise.all([
+          timePad(1000).then(testcasegen.next)
+          .then(function(testcase){
+            return testcase.value;
+          }),
+          testsgen.next().value
+        ])
+        .then(function(testset){
+          console.log(testset);
+          return expect(testset[0]).to.deep.include(testset[1]);
+        });
+      });
+    });
   });
 });

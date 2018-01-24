@@ -9,10 +9,9 @@ var express = require('express'),
   mongoose = require("mongoose"),
   SeamlessBackend = require("../seamless-mongoose-plugin.js");
 
+
+mongoose.connect(db);
 mongoose.Promise = global.Promise;
-mongoose.connect(db,{useMongoClient: true},function(ignore,connection){
-  connection.onOpen();
-});
 
 var testSchema = mongoose.Schema({
   "type": String,
@@ -41,10 +40,8 @@ app.use(jsonParser);
 app.use(bodyParser.urlencoded({
   extended: true
 }));
-
-app.use('/gtest/:_id', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
-
 app.use('/gtest/for/:addresee', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
+app.use('/gtest/:_id', SeamlessBackend.SeamlessHTTPEndpointFor(Test));
 
 //app.ws('/test/:_id', SeamlessBackend.SeamlessWSEndpointFor(Test));
 

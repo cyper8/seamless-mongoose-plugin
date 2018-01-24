@@ -3,10 +3,10 @@ const uuid = require("./uuid.js");
 const Cache = require("./cache.js");
 
 module.exports = exports = function SeamlessMongoosePlugin(schema){
-  
+
   var buffer = Cache();
   var clients = {};
-  
+
   function _hash(q){
     if (typeof q === "object") {
       try {
@@ -19,7 +19,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     if (typeof q === "string") return murmur(q||"");
     else throw new TypeError("argument is not convertible to string");
   }
-  
+
   function wrapA(value){
     if (Array.isArray(value)){
       return value;
@@ -28,7 +28,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       return [value];
     }
   }
-  
+
   function unwrapFirstFromA(arr){
     if (Array.isArray(arr) || (arr[0] != undefined)){
       return arr[0];
@@ -56,7 +56,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     }
   }
-  
+
   function CacheReqsByDocs(reqid){
     return function(docs){
       Promise.all(
@@ -65,22 +65,24 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         .map(function(did){
           return buffer.get(did,"requests")
             .then(function(r){
+              if (!r) r = [];
               if (r.indexOf(reqid) == -1) {
                 r.push(reqid);
                 return buffer.set(did,"requests",r);
               }
-            });
+            },console.error);
         })
-      );
+      )
+      .catch(console.error);
       return docs;
     }
   }
-  
+
   function CacheQuery(reqid,query){
     if (typeof query === "object") query = JSON.stringify(query);
     return buffer.set(reqid,"query",query);
   }
-  
+
   function RespondTo(responses,reqid){
     responses = wrapA(responses);
     return function(docs){
@@ -107,7 +109,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       });
     };
   }
-  
+
   // document middleware
   function _DM_(docs){
     var docids = getDocsFrom(docs).map(function(d){return d._id.toString()});
@@ -134,7 +136,8 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     .then(function(docs){
       Model.notifyRegisteredClients(docs.map(function(d){return d._id.toString()}))
       .catch(console.error);
-    });
+    })
+    .catch(console.error);
   }
 
   function registerClient(rid, peer) {
@@ -153,7 +156,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   };
 
   schema.statics.registerClient = registerClient;
-  
+
   schema.statics.deregisterClient = deregisterClient;
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
@@ -164,7 +167,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     }))
     .then(function(reqids){
       console.log(reqids);
-      reqids = [].concat.apply([],reqids) // flatten 2 layer deep array of change-affected reqids to 1 layer 
+      reqids = [].concat.apply([],reqids) // flatten 2 layer deep array of change-affected reqids to 1 layer
         .filter(function(e,i,a){return a.indexOf(e) === i}); // and filter unique
       return Promise.all(reqids.map(function (rid){
         return buffer.get(rid,"query") //get a query string for each reqid
@@ -203,7 +206,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
           .catch(console.error);
       });
   }
-  
+
   schema.statics.pollData = function(rid,query,response){
     response.status(200);
     return CacheQuery(rid,query)
@@ -219,6 +222,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
         },29000);
       }).catch(console.error);
     })
+    .catch(console.error);
   }
 
   schema.statics.postData = function(reqid,query,body,response){
@@ -306,7 +310,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
 
   // setting hooks
-  
+
   ['save','remove','insertMany','findOneAndRemove']
   .forEach(function(hook){
     schema.post(hook,_DM_);
