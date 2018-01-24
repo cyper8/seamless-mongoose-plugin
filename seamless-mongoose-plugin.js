@@ -158,10 +158,12 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
 
   schema.statics.notifyRegisteredClients = function(changed_docs_ids){
     var model = this;
-    return Promise.all(changed_docs_ids.map(function(did){
+    console.log(changed_docs_ids);
+    return Promise.all(wrapA(changed_docs_ids).map(function(did){
       return buffer.get(did,"requests")
     }))
     .then(function(reqids){
+      console.log(reqids);
       reqids = [].concat.apply([],reqids) // flatten 2 layer deep array of change-affected reqids to 1 layer 
         .filter(function(e,i,a){return a.indexOf(e) === i}); // and filter unique
       return Promise.all(reqids.map(function (rid){

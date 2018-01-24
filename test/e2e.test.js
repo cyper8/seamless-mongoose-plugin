@@ -35,22 +35,45 @@ function* hooksGen(){
   yield test2.remove();                                                 // remove
 }
 
+function timePad(time){
+  return new Promise(function(resolve,reject){
+    setTimeout(function(){
+      resolve();
+    },time);
+  });
+}
+
 function* requestGen(){
   while(true){
     yield request(app)
       .get('/gtest/for/Bob')
-      .set('Accept','application/json');
+      .set('Accept','application/json')
+      .expect(200)
+      .then(function(resp){
+        return resp.body;
+      });
   }
 }
+
+var testcasegen = hooksGen();
+var testsgen = requestGen();
 
 ['save','insertMany','findOneAndRemove','findOneAndUpdate','update','remove']
 .forEach(function(task){
   it(task,function(){
     return Promise.all([
-      
+      timePad(1000).then(testcasegen.next)
+      .then(function(testcase){
+        return testcase.value;
+      }),
+      testsgen.next().value
     ])
-  })
-})
+    .then(function(testset){
+      console.log(testset);
+      return expect(testset[0]).to.deep.include(testset[1]);
+    });
+  });
+});
 
 before(function(){
   return Test.create(testproto)

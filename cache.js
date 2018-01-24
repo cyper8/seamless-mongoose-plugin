@@ -1,8 +1,8 @@
-module.exports = function Cache(){
-    var databuf = {}, // buffer with stringified responses - per reqid
-      queries = {}, // buffer with query strings - per reqid
-      requests = {}, // buffer with reqids - per document
-      timestamp = {}; // buffer with timestamps of requests - per reqid
+module.exports = function Cache(options){
+    var databuf = {name:"data"}, // buffer with stringified responses - per reqid
+      queries = {name:"queries"}, // buffer with query strings - per reqid
+      requests = {name:"requests"}, // buffer with reqids - per document
+      timestamp = {name:"timestamps"}; // buffer with timestamps of requests - per reqid
 
     var BUFFER_TTL = 40000;
 
@@ -23,7 +23,7 @@ module.exports = function Cache(){
     // atomic ops - async
     function _get(table,key){
       if (key) return Promise.resolve(table[key]);
-      else return Promise.reject(new Error("requested key in table "+table+" is not found"));
+      else return Promise.reject(new Error("requested key \""+key+"\" in table \""+table.name+"\" is not found"));
     }
     function _set(table,key,value){
       if (value){
@@ -37,7 +37,7 @@ module.exports = function Cache(){
     }
     function _tsreset(id){
       return function(cond){
-        if (cond) timestamp[id] = Date.new();
+        if (cond) timestamp[id] = Date.now();
         else delete timestamp[id];
         return cond;
       }
