@@ -4,6 +4,9 @@
   "description": "Mongoose plugin for Seamless data-binding client-side framework",
   "main": "seamless-mongoose-plugin.js",
   "module": "seamless-mongoose-plugin.js",
+  "engines": {
+    "node": ">=7.5.0"
+  },
   "scripts": {
     "test": "./node_modules/mocha/bin/mocha"
   },
