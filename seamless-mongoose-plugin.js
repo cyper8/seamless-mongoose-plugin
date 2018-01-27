@@ -44,8 +44,10 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
   }
 
   function getDocsFrom(data){
-    return wrapA(data).filter(function(d){return !!(d && (d._id || d._doc))})
+    var d = wrapA(data).filter(function(d){return !!(d && (d._id || d._doc))})
       .map(function(d){ return d._doc || d });
+    d.forEach(function(doc){doc._id = doc._id.toString()});
+    return d;
   }
 
   SeamlessMongoosePlugin.getDocsFrom = getDocsFrom;
@@ -98,7 +100,6 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     return function(docs){
       responses.forEach(function(r){
         if (r && r.send){
-          r.type('json');
           r.send(docs);
           if (!r.isWebsocket){
             deregisterClient(reqid,r.id);
@@ -181,7 +182,10 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
     }))
     .then(function(reqids){
       reqids = [].concat.apply([],reqids) // flatten 2 layer deep array of change-affected reqids to 1 layer
-        .filter(function(e,i,a){return a.indexOf(e) === i}); // and filter unique
+        .filter(function(e,i,a){return (e) && (a.indexOf(e) === i) }); // and filter unique
+      if (!reqids.length) {
+        reqids = Object.keys(clients);
+      }
       return Promise.all(reqids.map(function (rid){
         if (rid !== undefined) {
           return buffer.get(rid,"query") //get a query string for each reqid
@@ -290,6 +294,7 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       var reqid = _hash(req.baseUrl+req.path);
       var query = req.params;
       res.isWebsocket = false;
+      res.type('json');
       switch (req.method){
         case "GET":
           if (req.query.nopoll) {
