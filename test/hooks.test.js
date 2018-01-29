@@ -51,8 +51,13 @@ function timePad(time){
 }
 
 function* hooksGen(){
-  test.message="Wow!";
-  yield test.save();                 // save
+  var testdoc;
+  yield Test.findOne({_id: test._id.toString()}).exec()
+    .then(function(doc){
+      testdoc = doc;
+      doc.message = "Wow!";
+      return doc.save();
+    },console.error);                 // save
   yield Test.insertMany([
     {type:"review",count:1,hoverable:false,message:"Boo!",addresee:"Bob"},
     {type:"review",count:1,hoverable:false,message:"Soo?",addresee:"Bob"},
@@ -61,7 +66,7 @@ function* hooksGen(){
   yield Test.findOneAndRemove({message:"Boo!"});              // findOneAndRemove
   yield Test.findOneAndUpdate({message:"Wow!"},{count:2},{new:true});                              // findOneAndUpdate
   yield Test.update({addresee:"Bob"},{count:2},{multi:true}).exec();    // update
-  yield test.remove();                              // remove
+  yield testdoc.remove();                              // remove
 }
 
 function* requestGen(){
@@ -93,14 +98,12 @@ var testsgen = requestGen();
 describe("Mongoose hooks trigger responses", function(){
   before(function(){
     this.timeout(5000);
-    return Test.create(testproto)
-      .then(function(doc){
-        return test = doc;
-      });
+    test = new Test(testproto);
+    return test.save();
   });
 
   after(function(){
-    Test.remove({},console.error);
+    return Test.remove({});
   });
 
   it("initiall no-polling GET request returns test document",function(){
@@ -116,7 +119,7 @@ describe("Mongoose hooks trigger responses", function(){
   .forEach(function(task){
     it(task,function(){
       return Promise.all([
-        timePad(500)
+        timePad(100)
           .then(function(){return testcasegen.next().value})
           .then(function(){
             return Test.find({addresee:"Bob"}).exec();
@@ -125,10 +128,9 @@ describe("Mongoose hooks trigger responses", function(){
         testsgen.next().value
       ])
       .then(function(testset){
-        console.log("------------>"+task+" success");
-        return console.log(testset);
-      })
-      .catch(function(err){console.log(task+" fail");console.error(err);});
+        return expect(notifier).to.be.called() &&
+          expect(testset[0]).to.deep.equal(testset[1]);
+      });
     });
   });
 });

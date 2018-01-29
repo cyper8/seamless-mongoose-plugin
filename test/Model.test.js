@@ -4,7 +4,7 @@ var expect = chai.expect;
 
 var Test = test_context.Test; // model
 
-describe.skip("Seamless Mongoose Plugin",function(){
+describe("Seamless Mongoose Plugin",function(){
   describe("Model with plugin", function(){
     it("should have changes notifier", function(){
       expect(Test).to.have.a.property("notifyRegisteredClients");

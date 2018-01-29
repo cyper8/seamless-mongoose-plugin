@@ -8,7 +8,10 @@
     "node": ">=7.5.0"
   },
   "scripts": {
-    "test": "./node_modules/mocha/bin/mocha"
+    "dev-db": "./gettestdb.sh",
+    "test": "npm run dev-db && ./node_modules/mocha/bin/mocha",
+    "debug": "npm run dev-db && ./node_modules/mocha/bin/mocha --inspect-brk",
+    "dev": "npm run dev-db && ./node_modules/mocha/bin/mocha --reporter min --watch"
   },
   "repository": {
     "type": "git",
@@ -42,7 +45,7 @@
   "dependencies": {
     "body-parser": "^1.18.2",
     "express": "^4.16.2",
-    "mongoose": "^5.0.1",
+    "mongoose": "^5.0.2",
     "murmurhash-js": "^1.0.0"
   }
 }

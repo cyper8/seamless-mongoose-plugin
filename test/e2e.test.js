@@ -23,7 +23,7 @@ function timePad(time){
   });
 }
 
-describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
+describe("Seamless Mongoose Plugin express middleware for HTTP",function(){
   this.slow(500);
   var test;
   before(function(){
@@ -35,7 +35,7 @@ describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
   });
 
   after(function(){
-    test.remove();
+    return Test.remove({});
   });
 
   it(
@@ -46,7 +46,6 @@ describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
               .set('Accept','application/json')
               .expect(200)
               .then(function(resp){
-                console.log(resp.body);
                 return expect(resp.body.length).to.equal(1) &&
                   expect(resp.body[0]._id).to.equal(test._id.toString());
               }).catch(console.error);
@@ -56,16 +55,17 @@ describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
     "accepts POST requests and returns changed objects",
     function(){
       var change = Object.assign({},testproto);
+      var change1 = Object.assign({},testproto);
       change.count = 2;
       change._id = test._id.toString();
+      change1.count = 3;
       return request(app)
         .post("/gtest/"+test._id.toString())
         .set('Content-Type','application/json')
         .set('Accept','application/json')
-        .send(change)
+        .send([change,change1])
         .expect(200)
         .then(function(resp){
-          console.log(resp.body);
           return expect(resp.body.length).to.equal(1) &&
             expect(resp.body[0]._id).to.equal(change._id) &&
             expect(resp.body[0].count).to.equal(2);
@@ -82,7 +82,6 @@ describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
               .set('Accept','application/json')
               .expect(200)
               .then(function(resp){
-                console.log(resp.body);
                 return expect(resp.body).to.be.empty;
               }).catch(console.error);
     }
@@ -106,7 +105,6 @@ describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
               .set('Accept','application/json')
               .expect(200)
               .then(function(resp){
-                console.log(resp.body);
                 return expect(resp.body[0]._id).to.deep.equal(test._id.toString()) &&
                       expect(resp.body[0].count).to.equal(3);
               });
@@ -119,7 +117,6 @@ describe.skip("Seamless Mongoose Plugin express middleware for HTTP",function(){
       this.timeout(35000);
       this.slow(3000);
       function Tests(resp){
-        console.log(resp.body);
         return expect(resp.body[0]._id).to.deep.equal(test._id.toString()) &&
               expect(resp.body[0].count).to.equal(2);
       }

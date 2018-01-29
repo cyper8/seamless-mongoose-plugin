@@ -275,7 +275,18 @@ module.exports = exports = function SeamlessMongoosePlugin(schema){
       }
     }))
     .then(function(bwres) { // remove those not mentioned
-      docids = body.map(function(e){return e._id}).concat(Object.values(bwres.insertedIds));
+      docids = body
+        .map(function(e){return e._id})
+        .concat(
+          Object.values(bwres.insertedIds)
+          .map(function(e){
+            if (typeof e === "string"){
+              return e
+            }
+            else return e.toString();
+          })
+        )
+        .filter(function(e){return e !== undefined});
       return Model.find(query)
         .where('_id')
         .nin(docids)
