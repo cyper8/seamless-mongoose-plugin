@@ -23,7 +23,7 @@ module.exports = function Cache(options){
     // atomic ops - async
     function _get(table,key){
       if (key) return Promise.resolve(table[key]);
-      else return Promise.reject(new Error("requested key \""+key+"\" in table \""+table.name+"\" is not found"));
+      else return Promise.reject(new Error("access key \""+key+"\" in table \""+table.name+"\" failure"));
     }
     function _set(table,key,value){
       if (value){
@@ -42,8 +42,12 @@ module.exports = function Cache(options){
         return cond;
       }
     }
-    
+
     return { // API - async
+      databuf,
+      queries,
+      requests,
+      timestamp,
       get(id,key){
         switch (key){
           case "data":

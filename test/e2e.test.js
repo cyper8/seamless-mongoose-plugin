@@ -13,27 +13,7 @@ var notifier = chai.spy.on(Test,"notifyRegisteredClients");
 var app = test_context.app;
 var seamless = test_context.SeamlessBackend;
 var testproto = {type:"review",count:1,hoverable:false,message:"Foo!",addresee:"Bob"};
-var test;
-
-function* hooksGen(){
-  var test2;
-  yield Test
-    .create((testproto.message="Wow!",testproto))
-    .then(function(doc){
-      return test2 = doc;
-    });                                                                   // save
-  yield Test.insertMany([
-    {type:"review",count:1,hoverable:false,message:"Boo!",addresee:"Bob"},
-    {type:"review",count:1,hoverable:false,message:"Soo?",addresee:"Bob"},
-    {type:"review",count:1,hoverable:false,message:"Noo!",addresee:"Bob"}
-  ]).then(function(docs){return docs});                             // insertMany
-  yield Test.findOneAndRemove({message:"Boo!"})
-    .then(function(doc){return doc});                         // findOneAndRemove
-  yield Test.findOneAndUpdate({message:"Foo!"},{count:2},{new:true}); 
-                                                              // findOneAndUpdate
-  yield Test.where({addresee:"Bob"}).update({count:2},{multi:true});    // update
-  yield test2.remove();                                                 // remove
-}
+var test2;
 
 function timePad(time){
   return new Promise(function(resolve,reject){
@@ -43,179 +23,130 @@ function timePad(time){
   });
 }
 
-function* requestGen(){
-  while(true){
-    yield request(app)
-      .get('/gtest/for/Bob')
-      .set('Accept','application/json')
-      .expect(200)
-      .then(function(resp){
-        return resp.body;
-      });
-  }
-}
-
-var testcasegen = hooksGen();
-var testsgen = requestGen();
-
-['save','insertMany','findOneAndRemove','findOneAndUpdate','update','remove']
-.forEach(function(task){
-  it(task,function(){
-    return Promise.all([
-      timePad(1000).then(testcasegen.next)
-      .then(function(testcase){
-        return testcase.value;
-      }),
-      testsgen.next().value
-    ])
-    .then(function(testset){
-      console.log(testset);
-      return expect(testset[0]).to.deep.include(testset[1]);
-    });
-  });
-});
-
-before(function(){
-  return Test.create(testproto)
-    .then(function(doc){
-      test = doc;
-    });
-});
-
-after(function(){
-  test.remove();
-});
-
-describe("Seamless Mongoose Plugin",function(){
+describe("Seamless Mongoose Plugin express middleware for HTTP",function(){
   this.slow(500);
-  describe("express middleware for HTTP",function(){
-    it(
-      "accepts immediate (nopoll) GET requests and answers them right away",
-      function(){
-        return request(app)
-                .get(`/gtest/${test._id.toString()}?nopoll=true`)
-                .set('Accept','application/json')
-                .expect(200)
-                .then(function(resp){
-                  return expect(resp.body).to.deep.include(testproto);
-                });
+  var test;
+  before(function(){
+    this.timeout(5000);
+    return Test.create(testproto)
+      .then(function(doc){
+        test = doc;
+      });
+  });
+
+  after(function(){
+    return Test.remove({});
+  });
+
+  it(
+    "accepts immediate (nopoll) GET requests and answers them right away",
+    function(){
+      return request(app)
+              .get(`/gtest/${test._id.toString()}?nopoll=true`)
+              .set('Accept','application/json')
+              .expect(200)
+              .then(function(resp){
+                return expect(resp.body.length).to.equal(1) &&
+                  expect(resp.body[0]._id).to.equal(test._id.toString());
+              }).catch(console.error);
+    }
+  );
+  it(
+    "accepts POST requests and returns changed objects",
+    function(){
+      var change = Object.assign({},testproto);
+      var change1 = Object.assign({},testproto);
+      change.count = 2;
+      change._id = test._id.toString();
+      change1.count = 3;
+      return request(app)
+        .post("/gtest/"+test._id.toString())
+        .set('Content-Type','application/json')
+        .set('Accept','application/json')
+        .send([change,change1])
+        .expect(200)
+        .then(function(resp){
+          return expect(resp.body.length).to.equal(1) &&
+            expect(resp.body[0]._id).to.equal(change._id) &&
+            expect(resp.body[0].count).to.equal(2);
+        }).catch(console.error)
+    }
+  );
+  it(
+    "accepts polling GETS: holds for 29 secs and returns happy nothing",
+    function(){
+      this.timeout(35000);
+      this.slow(30000);
+      return request(app)
+              .get("/gtest/"+test._id.toString())
+              .set('Accept','application/json')
+              .expect(200)
+              .then(function(resp){
+                return expect(resp.body).to.be.empty;
+              }).catch(console.error);
+    }
+  );
+  it(
+    "accepts polling GETS: if background change happens - it is returned",
+    function(){
+      this.timeout(5000);
+      this.slow(3000);
+
+      var change = timePad(1000)
+      .then(function(){
+        test.count = 3;
+        return test.save();
+      })
+      .then(function(res){
+        return expect(notifier).to.be.called();
+      });
+      var req = request(app)
+              .get(`/gtest/${test._id.toString()}`)
+              .set('Accept','application/json')
+              .expect(200)
+              .then(function(resp){
+                return expect(resp.body[0]._id).to.deep.equal(test._id.toString()) &&
+                      expect(resp.body[0].count).to.equal(3);
+              });
+      return Promise.all([change,req]).catch(console.error);
+    }
+  );
+  it(
+    "accepts polling GETS: if parallel POST change happens - it is returned to the POST and polling GET",
+    function(){
+      this.timeout(35000);
+      this.slow(3000);
+      function Tests(resp){
+        return expect(resp.body[0]._id).to.deep.equal(test._id.toString()) &&
+              expect(resp.body[0].count).to.equal(2);
       }
-    );
-    it(
-      "accepts POST requests and returns changed objects",
-      function(){
-        var change = testproto;
-        change.count = 2;
-        change._id = test._id.toString();
+      var notifier = chai.spy.on(Test,"notifyRegisteredClients");
+      var change = timePad(2000)
+      .then(function(){
+        var t = Object.assign({},testproto);
+        t.count = 2;
+        t._id = test._id.toString();
         return request(app)
-          .post("/gtest/"+test._id.toString())
+          .post(`/gtest/${test._id.toString()}`)
           .set('Content-Type','application/json')
           .set('Accept','application/json')
-          .send(change)
+          .send(t)
           .expect(200)
-          .then(function(resp){
-            return expect(resp.body).to.be.not.empty &&
-              expect(resp.body).to.deep.include(change);
+          .then(function(res){
+            return expect(notifier).to.be.called() && Tests(res);
           })
-      }
-    );
-    it(
-      "accepts polling GETS: holds for 29 secs and returns happy nothing",
-      function(){
-        this.timeout(35000);
-        this.slow(30000);
-        return request(app)
-                .get("/gtest/"+test._id.toString())
-                .set('Accept','application/json')
-                .expect(200)
-                .then(function(resp){
-                  return expect(resp.body).to.be.empty;
-                });
-      }
-    );
-    it(
-      "accepts polling GETS: if background change happens - it is returned",
-      function(){
-        this.timeout(5000);
-        this.slow(3000);
-        
-        var change = new Promise(function(resolve,reject){
-          setTimeout(function(){
-            resolve();
-          },2000);
-        })
-        .then(function(){
-          test.count = 2;
-          return test.save();
-        })
-        .then(function(res){
-          return expect(notifier).to.be.called();
-        });
-        var req = request(app)
-                .get(`/gtest/${test._id.toString()}`)
-                // .get(`/gtest/${test._id.toString()}?nopoll=true`)
-                .set('Accept','application/json')
-                .expect(200)
-                // .then(function(){
-                //   return request(app)
-                //     .get("/gtest/"+test._id.toString())
-                //     .set('Accept','application/json')
-                //     .expect(200)
-                // })
-                .then(function(resp){
-                  return expect(resp.body._id).to.deep.equal(test._id.toString()) &&
-                        expect(resp.body.count).to.equal(2);
-                });
-        return Promise.all([change,req]);
-      }
-    );
-    it(
-      "accepts polling GETS: if parallel POST change happens - it is returned to the POST and polling GET",
-      function(){
-        this.timeout(35000);
-        this.slow(3000);
-        function Tests(resp){
-          return expect(resp.body._id).to.deep.equal(test._id.toString()) &&
-                expect(resp.body.count).to.equal(2);
-        }
-        var notifier = chai.spy.on(Test,"notifyRegisteredClients");
-        var change = new Promise(function(resolve,reject){
-          setTimeout(function(){
-            resolve();
-          },2000);
-        })
-        .then(function(){
-          var t = testproto;
-          t.count = 2;
-          t._id = test._id.toString();
-          return request(app)
-            .post(`/gtest/${test._id.toString()}`)
-            .set('Content-Type','application/json')
-            .set('Accept','application/json')
-            .send(t)
-            .expect(200)
-            .then(function(res){
-              return expect(notifier).to.be.called() && Tests(res);
-            });
-        })
-        .catch(console.error);
-        var req = request(app)
-                .get(`/gtest/${test._id.toString()}`)
-                // .get(`/gtest/${test._id.toString()}?nopoll=true`)
-                .set('Accept','application/json')
-                .expect(200)
-                // .then(function(){
-                //   return request(app)
-                //     .get("/gtest/"+test._id.toString())
-                //     .set('Accept','application/json')
-                //     .expect(200)
-                // })
-                .then(function(res){
-                  return Tests(res);
-                })
-                .catch(console.error);
-        return Promise.all([change,req]);
-      }
-    );
-  });
+          .catch(console.error);
+      })
+      .catch(console.error);
+      var req = request(app)
+              .get(`/gtest/${test._id.toString()}`)
+              .set('Accept','application/json')
+              .expect(200)
+              .then(function(res){
+                return Tests(res);
+              })
+              .catch(console.error);
+      return Promise.all([change,req]).catch(console.error);
+    }
+  );
 });

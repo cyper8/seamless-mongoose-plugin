@@ -1,11 +1,17 @@
 {
   "name": "seamless-mongoose-plugin",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Mongoose plugin for Seamless data-binding client-side framework",
   "main": "seamless-mongoose-plugin.js",
   "module": "seamless-mongoose-plugin.js",
+  "engines": {
+    "node": ">=7.5.0"
+  },
   "scripts": {
-    "test": "./node_modules/mocha/bin/mocha"
+    "dev-db": "./gettestdb.sh",
+    "test": "npm run dev-db && ./node_modules/mocha/bin/mocha",
+    "debug": "npm run dev-db && ./node_modules/mocha/bin/mocha --inspect-brk",
+    "dev": "npm run dev-db && ./node_modules/mocha/bin/mocha --reporter min --watch"
   },
   "repository": {
     "type": "git",
@@ -19,7 +25,7 @@
     "nodejs"
   ],
   "peerDependencies": {
-    "mongoose": "^4.11.0",
+    "mongoose": "^5.0.1",
     "express": "^4.14.0",
     "body-parser": "^1.17.2"
   },
@@ -30,13 +36,16 @@
   },
   "homepage": "https://github.com/cyper8/seamless-mongoose-plugin#readme",
   "devDependencies": {
-    "chai": "^4.0.2",
+    "chai": "^4.1.2",
     "chai-as-promised": "^7.0.0",
     "chai-spies": "^0.7.1",
-    "mocha": "^3.4.2",
+    "mocha": "^3.5.3",
     "supertest": "^3.0.0"
   },
   "dependencies": {
+    "body-parser": "^1.18.2",
+    "express": "^4.16.2",
+    "mongoose": "^5.0.2",
     "murmurhash-js": "^1.0.0"
   }
 }
