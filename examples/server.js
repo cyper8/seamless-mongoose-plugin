@@ -10,9 +10,7 @@ var express = require('express'),
   SeamlessBackend = require("../seamless-mongoose-plugin.js");
 
 mongoose.Promise = global.Promise;
-mongoose.connect(db,{useMongoClient: true},function(ignore,connection){
-  connection.onOpen();
-});
+mongoose.connect(db,{useMongoClient: true});
 
 var testSchema = mongoose.Schema({
   "type": String,
