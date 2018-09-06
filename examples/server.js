@@ -12,7 +12,7 @@ var express = require('express'),
 
 mongoose.connect(db);
 mongoose.Promise = global.Promise;
-mongoose.connect(db,{useMongoClient: true});
+// mongoose.connect(db,{useMongoClient: true});
 
 var testSchema = mongoose.Schema({
   "type": String,
